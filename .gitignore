@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+/src/vendor/
+/src/node_modules/
+
+# Environment / secrets
+/src/.env
+/src/.env.backup
+/src/.env.production
+.env
+
+# Docker data volumes (if ever switched to bind-mounted data dirs)
+/.docker/data/
+/.docker/mysql/data/
+/.docker/redis/data/
+db_data/
+redis_data/
+
+# IDE / tooling
+.idea/
+.vscode/
+/skills/
+
+# OS
+.DS_Store
+Thumbs.db

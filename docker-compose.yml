@@ -1,0 +1,131 @@
+name: support-ticket
+
+x-php-base: &php-base
+  build:
+    context: .
+    dockerfile: .docker/php/Dockerfile
+    args:
+      UID: ${HOST_UID:-1000}
+      GID: ${HOST_GID:-1000}
+  image: support-ticket-php:latest
+  restart: unless-stopped
+  working_dir: /var/www/html
+  volumes:
+    - ./src:/var/www/html:z
+  networks:
+    - ticket_network
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  app:
+    <<: *php-base
+    container_name: ticket_app
+    hostname: app
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm -t >/dev/null 2>&1 && nc -z 127.0.0.1 9000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  nginx:
+    image: nginx:alpine
+    container_name: ticket_nginx
+    hostname: nginx
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    volumes:
+      - ./src:/var/www/html:z
+      - ./.docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro,z
+    networks:
+      - ticket_network
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/up || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  db:
+    image: mysql:8.0
+    container_name: ticket_db
+    hostname: db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ticket_system
+      MYSQL_USER: ticket_user
+      MYSQL_PASSWORD: ticket_secret
+      MYSQL_ROOT_PASSWORD: root_secret
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - ticket_network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ticket_redis
+    hostname: redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ticket_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  queue_worker:
+    <<: *php-base
+    container_name: ticket_queue_worker
+    hostname: queue_worker
+    command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3", "--timeout=90"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'queue:work' >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  scheduler:
+    <<: *php-base
+    container_name: ticket_scheduler
+    hostname: scheduler
+    command: ["sh", "-c", "while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'sleep 60|schedule:run' >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  ticket_network:
+    name: ticket_network
+    driver: bridge
+
+volumes:
+  db_data:
+    name: ticket_db_data
+  redis_data:
+    name: ticket_redis_data
