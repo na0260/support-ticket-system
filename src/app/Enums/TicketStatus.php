@@ -61,10 +61,18 @@ enum TicketStatus: string
     }
 
     /**
-     * Work on the ticket has finished (resolved or closed).
+     * Work on the ticket has finished permanently (closed only).
      */
     public function isTerminal(): bool
     {
-        return $this === self::RESOLVED || $this === self::CLOSED;
+        return $this === self::CLOSED;
+    }
+
+    /**
+     * Whether the ticket has been resolved (can still be closed or reopened).
+     */
+    public function isResolved(): bool
+    {
+        return $this === self::RESOLVED;
     }
 }

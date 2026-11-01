@@ -193,6 +193,57 @@ final class ModelRelationshipsTest extends TestCase
     }
 
     #[Test]
+    public function ticket_scopes_isolate_and_filter_data_properly(): void
+    {
+        $customerA = User::factory()->customer()->create();
+        $customerB = User::factory()->customer()->create();
+        $agentA = User::factory()->agent()->create();
+        $agentB = User::factory()->agent()->create();
+        $admin = User::factory()->admin()->create();
+
+        $ticketA = Ticket::factory()->for($customerA, 'creator')->create([
+            'status' => TicketStatus::OPEN,
+            'assigned_agent_id' => null,
+        ]);
+        $ticketB = Ticket::factory()->for($customerB, 'creator')->create([
+            'status' => TicketStatus::IN_PROGRESS,
+            'assigned_agent_id' => $agentA->id,
+        ]);
+        $ticketResolved = Ticket::factory()->for($customerA, 'creator')->create([
+            'status' => TicketStatus::RESOLVED,
+            'assigned_agent_id' => $agentA->id,
+        ]);
+        $ticketClosed = Ticket::factory()->for($customerB, 'creator')->create([
+            'status' => TicketStatus::CLOSED,
+            'assigned_agent_id' => $agentB->id,
+        ]);
+
+        // scopeVisibleTo
+        $customerAVisible = Ticket::query()->visibleTo($customerA)->pluck('id')->all();
+        $this->assertEqualsCanonicalizing([$ticketA->id, $ticketResolved->id], $customerAVisible);
+
+        $this->assertCount(4, Ticket::query()->visibleTo($agentA)->get());
+        $this->assertCount(4, Ticket::query()->visibleTo($admin)->get());
+
+        // scopeActive (excludes closed, includes open, in_progress, resolved)
+        $activeIds = Ticket::query()->active()->pluck('id')->all();
+        $this->assertEqualsCanonicalizing([$ticketA->id, $ticketB->id, $ticketResolved->id], $activeIds);
+        $this->assertNotContains($ticketClosed->id, $activeIds);
+
+        // scopeResolvedOrClosed
+        $resolvedOrClosedIds = Ticket::query()->resolvedOrClosed()->pluck('id')->all();
+        $this->assertEqualsCanonicalizing([$ticketResolved->id, $ticketClosed->id], $resolvedOrClosedIds);
+
+        // scopeUnassigned (active + unassigned)
+        $unassignedIds = Ticket::query()->unassigned()->pluck('id')->all();
+        $this->assertEqualsCanonicalizing([$ticketA->id], $unassignedIds);
+
+        // scopeAssignedTo
+        $agentAIds = Ticket::query()->assignedTo($agentA)->pluck('id')->all();
+        $this->assertEqualsCanonicalizing([$ticketB->id, $ticketResolved->id], $agentAIds);
+    }
+
+    #[Test]
     public function deleting_an_agent_unassigns_their_tickets(): void
     {
         $agent = User::factory()->agent()->create();
@@ -201,6 +252,26 @@ final class ModelRelationshipsTest extends TestCase
         $agent->delete();
 
         $this->assertNull($ticket->fresh()?->assigned_agent_id);
+    }
+
+    #[Test]
+    public function deleting_a_user_nulls_out_uploaded_by_on_attachments(): void
+    {
+        $uploader = User::factory()->customer()->create();
+        $ticket = Ticket::factory()->create();
+
+        $attachment = $ticket->attachments()->create([
+            'disk' => 'private',
+            'file_path' => 'attachments/file.pdf',
+            'file_name' => 'file.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 1024,
+            'uploaded_by' => $uploader->id,
+        ]);
+
+        $uploader->delete();
+
+        $this->assertNull($attachment->fresh()?->uploaded_by);
     }
 
     #[Test]
@@ -237,11 +308,16 @@ final class ModelRelationshipsTest extends TestCase
         $this->assertSame(8, TicketPriority::HIGH->slaHours());
         $this->assertSame(2, TicketPriority::CRITICAL->slaHours());
 
+        // Updated in Phase 2: only CLOSED is terminal; RESOLVED is still active
         $this->assertTrue(TicketStatus::WAITING_CUSTOMER->isActive());
-        $this->assertTrue(TicketStatus::RESOLVED->isTerminal());
+        $this->assertTrue(TicketStatus::RESOLVED->isActive());
+        $this->assertFalse(TicketStatus::RESOLVED->isTerminal());
+        $this->assertTrue(TicketStatus::RESOLVED->isResolved());
+        $this->assertTrue(TicketStatus::CLOSED->isTerminal());
         $this->assertFalse(TicketStatus::CLOSED->isActive());
+        $this->assertFalse(TicketStatus::CLOSED->isResolved());
         $this->assertSame(
-            [TicketStatus::OPEN, TicketStatus::IN_PROGRESS, TicketStatus::WAITING_CUSTOMER],
+            [TicketStatus::OPEN, TicketStatus::IN_PROGRESS, TicketStatus::WAITING_CUSTOMER, TicketStatus::RESOLVED],
             TicketStatus::activeCases(),
         );
 

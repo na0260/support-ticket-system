@@ -15,6 +15,39 @@
                     <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
                         {{ __('Dashboard') }}
                     </x-nav-link>
+
+                    @if (Auth::user()?->role?->isCustomer())
+                        <x-nav-link :href="route('tickets.index')" :active="request()->routeIs('tickets.index')">
+                            {{ __('My Tickets') }}
+                        </x-nav-link>
+                        <x-nav-link :href="route('tickets.create')" :active="request()->routeIs('tickets.create')">
+                            {{ __('Submit Ticket') }}
+                        </x-nav-link>
+                    @endif
+
+                    @if (Auth::user()?->role?->isAgent())
+                        <x-nav-link :href="route('tickets.index')" :active="request()->routeIs('tickets.index')">
+                            {{ __('All Tickets') }}
+                        </x-nav-link>
+                        <x-nav-link :href="route('agent.unassigned')" :active="request()->routeIs('agent.unassigned')">
+                            {{ __('Unassigned Tickets') }}
+                        </x-nav-link>
+                        <x-nav-link :href="route('agent.queue')" :active="request()->routeIs('agent.queue')">
+                            {{ __('My Queue') }}
+                        </x-nav-link>
+                    @endif
+
+                    @if (Auth::user()?->role?->isAdmin())
+                        <x-nav-link :href="route('tickets.index')" :active="request()->routeIs('tickets.index')">
+                            {{ __('Ticket Center') }}
+                        </x-nav-link>
+                        <x-nav-link :href="route('admin.categories.index')" :active="request()->routeIs('admin.categories.*')">
+                            {{ __('Categories') }}
+                        </x-nav-link>
+                        <x-nav-link :href="route('admin.agents.workload')" :active="request()->routeIs('admin.agents.workload')">
+                            {{ __('Agent Workload') }}
+                        </x-nav-link>
+                    @endif
                 </div>
             </div>
 
@@ -23,7 +56,20 @@
                 <x-dropdown align="right" width="48">
                     <x-slot name="trigger">
                         <button class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-gray-500 bg-white hover:text-gray-700 focus:outline-none transition ease-in-out duration-150">
-                            <div>{{ Auth::user()->name }}</div>
+                            <span class="inline-flex items-center gap-2">
+                                <span>{{ Auth::user()->name }}</span>
+                                @php
+                                    $role = Auth::user()->role;
+                                    $roleBadgeClasses = match ($role) {
+                                        \App\Enums\UserRole::ADMIN => 'bg-purple-100 text-purple-800 border-purple-200',
+                                        \App\Enums\UserRole::AGENT => 'bg-blue-100 text-blue-800 border-blue-200',
+                                        default => 'bg-gray-100 text-gray-800 border-gray-200',
+                                    };
+                                @endphp
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border {{ $roleBadgeClasses }}">
+                                    [{{ $role->label() }}]
+                                </span>
+                            </span>
 
                             <div class="ms-1">
                                 <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
@@ -70,13 +116,59 @@
             <x-responsive-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
                 {{ __('Dashboard') }}
             </x-responsive-nav-link>
+
+            @if (Auth::user()?->role?->isCustomer())
+                <x-responsive-nav-link :href="route('tickets.index')" :active="request()->routeIs('tickets.index')">
+                    {{ __('My Tickets') }}
+                </x-responsive-nav-link>
+                <x-responsive-nav-link :href="route('tickets.create')" :active="request()->routeIs('tickets.create')">
+                    {{ __('Submit Ticket') }}
+                </x-responsive-nav-link>
+            @endif
+
+            @if (Auth::user()?->role?->isAgent())
+                <x-responsive-nav-link :href="route('tickets.index')" :active="request()->routeIs('tickets.index')">
+                    {{ __('All Tickets') }}
+                </x-responsive-nav-link>
+                <x-responsive-nav-link :href="route('agent.unassigned')" :active="request()->routeIs('agent.unassigned')">
+                    {{ __('Unassigned Tickets') }}
+                </x-responsive-nav-link>
+                <x-responsive-nav-link :href="route('agent.queue')" :active="request()->routeIs('agent.queue')">
+                    {{ __('My Queue') }}
+                </x-responsive-nav-link>
+            @endif
+
+            @if (Auth::user()?->role?->isAdmin())
+                <x-responsive-nav-link :href="route('tickets.index')" :active="request()->routeIs('tickets.index')">
+                    {{ __('Ticket Center') }}
+                </x-responsive-nav-link>
+                <x-responsive-nav-link :href="route('admin.categories.index')" :active="request()->routeIs('admin.categories.*')">
+                    {{ __('Categories') }}
+                </x-responsive-nav-link>
+                <x-responsive-nav-link :href="route('admin.agents.workload')" :active="request()->routeIs('admin.agents.workload')">
+                    {{ __('Agent Workload') }}
+                </x-responsive-nav-link>
+            @endif
         </div>
 
         <!-- Responsive Settings Options -->
         <div class="pt-4 pb-1 border-t border-gray-200">
-            <div class="px-4">
-                <div class="font-medium text-base text-gray-800">{{ Auth::user()->name }}</div>
-                <div class="font-medium text-sm text-gray-500">{{ Auth::user()->email }}</div>
+            <div class="px-4 flex items-center justify-between">
+                <div>
+                    <div class="font-medium text-base text-gray-800">{{ Auth::user()->name }}</div>
+                    <div class="font-medium text-sm text-gray-500">{{ Auth::user()->email }}</div>
+                </div>
+                @php
+                    $role = Auth::user()->role;
+                    $roleBadgeClasses = match ($role) {
+                        \App\Enums\UserRole::ADMIN => 'bg-purple-100 text-purple-800 border-purple-200',
+                        \App\Enums\UserRole::AGENT => 'bg-blue-100 text-blue-800 border-blue-200',
+                        default => 'bg-gray-100 text-gray-800 border-gray-200',
+                    };
+                @endphp
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border {{ $roleBadgeClasses }}">
+                    [{{ $role->label() }}]
+                </span>
             </div>
 
             <div class="mt-3 space-y-1">

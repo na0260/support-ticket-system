@@ -9,6 +9,7 @@ use App\Enums\TicketPriority;
 use App\Enums\TicketStatus;
 use Database\Factories\TicketFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -140,5 +141,62 @@ class Ticket extends Model
     public function activities(): HasMany
     {
         return $this->hasMany(TicketActivity::class);
+    }
+
+    /**
+     * Data isolation scope: restricts ticket visibility based on user role.
+     * Customers see only their own tickets; Agents and Admins see all.
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopeVisibleTo(Builder $query, User $user): void
+    {
+        if ($user->role->isCustomer()) {
+            $query->where('created_by', $user->id);
+        }
+    }
+
+    /**
+     * Scope tickets that are actively in flight (non-terminal, i.e. status != 'closed').
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopeActive(Builder $query): void
+    {
+        $query->where('status', '!=', TicketStatus::CLOSED->value);
+    }
+
+    /**
+     * Scope tickets that are either resolved or closed.
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopeResolvedOrClosed(Builder $query): void
+    {
+        $query->whereIn('status', [
+            TicketStatus::RESOLVED->value,
+            TicketStatus::CLOSED->value,
+        ]);
+    }
+
+    /**
+     * Scope active tickets that have no assigned agent.
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopeUnassigned(Builder $query): void
+    {
+        $query->whereNull('assigned_agent_id')
+            ->where('status', '!=', TicketStatus::CLOSED->value);
+    }
+
+    /**
+     * Scope tickets assigned to a specific agent.
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopeAssignedTo(Builder $query, User $agent): void
+    {
+        $query->where('assigned_agent_id', $agent->id);
     }
 }
