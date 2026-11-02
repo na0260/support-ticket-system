@@ -20,6 +20,7 @@ use App\Services\Assignment\TicketAssignmentService;
 use App\Services\AttachmentService;
 use App\Services\Sla\BusinessHoursCalculator;
 use App\Services\TicketNumberGenerator;
+use App\Services\TicketSearchService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -31,28 +32,17 @@ use Illuminate\View\View;
 final class TicketController extends Controller
 {
     /**
-     * List tickets visible to the authenticated user with tabs for Active vs Resolved/Closed.
+     * List tickets visible to the authenticated user with tabs for Active vs Resolved/Closed and multi-filtering.
      */
-    public function index(Request $request): View|JsonResponse
+    public function index(Request $request, TicketSearchService $searchService): View|JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
 
-        $tab = $request->query('tab', 'active');
-        $query = Ticket::query()->visibleTo($user);
+        $filters = $request->query();
+        $tab = (string) ($filters['tab'] ?? 'active');
 
-        if ($tab === 'resolved_or_closed') {
-            $query->resolvedOrClosed();
-        } else {
-            $tab = 'active';
-            $query->active();
-        }
-
-        $tickets = $query
-            ->with(['category', 'assignedAgent', 'creator'])
-            ->latest('id')
-            ->paginate(15)
-            ->withQueryString();
+        $tickets = $searchService->paginate($user, $filters, 15);
 
         $activeCount = Ticket::query()->visibleTo($user)->active()->count();
         $resolvedOrClosedCount = Ticket::query()->visibleTo($user)->resolvedOrClosed()->count();
@@ -63,14 +53,27 @@ final class TicketController extends Controller
                 'current_tab' => $tab,
                 'active_count' => $activeCount,
                 'resolved_or_closed_count' => $resolvedOrClosedCount,
+                'filters' => $filters,
             ]);
         }
+
+        $categories = TicketCategory::query()->where('is_active', true)->orderBy('name')->get();
+        $agents = $user->role->isStaff() ? User::agents()->orderBy('name')->get() : collect();
+        $priorities = TicketPriority::cases();
+        $statuses = TicketStatus::cases();
+        $slaStatuses = SlaStatus::cases();
 
         return view('tickets.index', [
             'tickets' => $tickets,
             'currentTab' => $tab,
             'activeCount' => $activeCount,
             'resolvedOrClosedCount' => $resolvedOrClosedCount,
+            'filters' => $filters,
+            'categories' => $categories,
+            'agents' => $agents,
+            'priorities' => $priorities,
+            'statuses' => $statuses,
+            'slaStatuses' => $slaStatuses,
         ]);
     }
 
