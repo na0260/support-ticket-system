@@ -8,7 +8,7 @@ export HOST_GID := $(shell id -g)
 NODE := docker run --rm -u $(HOST_UID):$(HOST_GID) -e HOME=/tmp -v $(CURDIR)/src:/app:z -w /app $(NODE_IMAGE)
 
 .DEFAULT_GOAL := help
-.PHONY: help up down build restart ps logs bash artisan composer test migrate fresh seed perms lint npm assets
+.PHONY: help up down build restart ps logs bash artisan composer test test-filter migrate fresh seed perms lint npm assets
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -42,6 +42,9 @@ composer: ## Run composer (make composer c="require foo/bar")
 
 test: ## Run the test suite
 	$(DC) exec $(APP) php artisan test
+
+test-filter: ## Run filtered tests (make test-filter filter=TicketImport)
+	$(DC) exec $(APP) php artisan test --filter=$(filter)
 
 migrate: ## Run database migrations
 	$(DC) exec $(APP) php artisan migrate
