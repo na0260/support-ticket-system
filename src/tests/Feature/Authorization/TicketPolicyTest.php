@@ -79,12 +79,13 @@ final class TicketPolicyTest extends TestCase
     #[Test]
     public function agent_and_admin_can_claim_an_unassigned_active_ticket(): void
     {
-        $ticket = Ticket::factory()->create(['assigned_agent_id' => null, 'status' => TicketStatus::OPEN]);
+        $ticket1 = Ticket::factory()->create(['assigned_agent_id' => null, 'status' => TicketStatus::OPEN]);
+        $ticket2 = Ticket::factory()->create(['assigned_agent_id' => null, 'status' => TicketStatus::OPEN]);
         $agent = User::factory()->agent()->create();
         $admin = User::factory()->admin()->create();
 
-        $this->actingAs($agent)->post(route('tickets.claim', $ticket))->assertOk();
-        $this->actingAs($admin)->post(route('tickets.claim', $ticket))->assertOk();
+        $this->actingAs($agent)->post(route('tickets.claim', $ticket1))->assertOk();
+        $this->actingAs($admin)->post(route('tickets.claim', $ticket2))->assertOk();
     }
 
     #[Test]
