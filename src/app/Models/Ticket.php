@@ -7,6 +7,9 @@ namespace App\Models;
 use App\Enums\SlaStatus;
 use App\Enums\TicketPriority;
 use App\Enums\TicketStatus;
+use App\Services\Sla\BusinessHoursCalculator;
+use App\Services\Sla\SlaEvaluationService;
+use Carbon\CarbonInterface;
 use Database\Factories\TicketFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Date;
 
 /**
  * @property int $id
@@ -141,6 +145,37 @@ class Ticket extends Model
     public function activities(): HasMany
     {
         return $this->hasMany(TicketActivity::class);
+    }
+
+    public function isResolved(): bool
+    {
+        return $this->status->isResolved();
+    }
+
+    /**
+     * Live SLA evaluation (independent of the persisted sla_status column).
+     */
+    public function isSlaBreached(?CarbonInterface $now = null): bool
+    {
+        return app(SlaEvaluationService::class)->evaluate($this, $now) === SlaStatus::BREACHED;
+    }
+
+    public function isSlaApproachingBreach(?CarbonInterface $now = null): bool
+    {
+        return app(SlaEvaluationService::class)->evaluate($this, $now) === SlaStatus::APPROACHING_BREACH;
+    }
+
+    /**
+     * Business minutes left until sla_due_at. Zero once breached or when the
+     * SLA clock has stopped (resolved / closed).
+     */
+    public function remainingBusinessMinutes(?CarbonInterface $now = null): int
+    {
+        if ($this->isResolved() || $this->status->isTerminal()) {
+            return 0;
+        }
+
+        return app(BusinessHoursCalculator::class)->businessMinutesBetween($now ?? Date::now(), $this->sla_due_at);
     }
 
     /**

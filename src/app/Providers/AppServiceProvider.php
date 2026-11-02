@@ -7,6 +7,8 @@ namespace App\Providers;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Models\User;
+use App\Services\Sla\SlaSettings;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
@@ -33,7 +35,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Resolved per use (not a singleton) so runtime config changes, e.g. in
+        // tests or long-running workers after config reloads, are honoured.
+        $this->app->bind(SlaSettings::class, static fn (Application $app): SlaSettings => SlaSettings::fromConfig(
+            (array) $app->make('config')->get('sla', []),
+            (string) $app->make('config')->get('app.timezone', 'UTC'),
+        ));
     }
 
     /**
