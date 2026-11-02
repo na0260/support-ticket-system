@@ -2,13 +2,16 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\AgentWorkloadController;
+use App\Http\Controllers\Admin\CategoryController;
+use App\Http\Controllers\Agent\AgentQueueController;
+use App\Http\Controllers\Agent\UnassignedTicketController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\TicketAttachmentController;
 use App\Http\Controllers\TicketController;
 use App\Http\Controllers\TicketImportController;
 use App\Http\Controllers\TicketMessageController;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -102,18 +105,27 @@ Route::middleware('auth')->group(function (): void {
 
     // Role-Guarded Staff Workspace: Agent & Admin
     Route::middleware('role:agent,admin')->prefix('agent')->name('agent.')->group(function (): void {
-        Route::get('/unassigned', fn (): JsonResponse => response()->json(['message' => 'agent.unassigned stub']))
+        Route::get('/unassigned', [UnassignedTicketController::class, 'index'])
             ->name('unassigned');
-        Route::get('/queue', fn (): JsonResponse => response()->json(['message' => 'agent.queue stub']))
+        Route::get('/queue', [AgentQueueController::class, 'index'])
             ->name('queue');
     });
 
     // Role-Guarded Admin Console: Admin Only
     Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function (): void {
-        Route::get('/categories', fn (): JsonResponse => response()->json(['message' => 'admin.categories stub']))
+        Route::get('/categories', [CategoryController::class, 'index'])
             ->name('categories.index');
-        Route::get('/agents/workload', fn (): JsonResponse => response()->json(['message' => 'admin.workload stub']))
+        Route::post('/categories', [CategoryController::class, 'store'])
+            ->name('categories.store');
+        Route::match(['put', 'patch'], '/categories/{category}', [CategoryController::class, 'update'])
+            ->name('categories.update');
+        Route::delete('/categories/{category}', [CategoryController::class, 'destroy'])
+            ->name('categories.destroy');
+
+        Route::get('/agents/workload', [AgentWorkloadController::class, 'index'])
             ->name('agents.workload');
+        Route::post('/agents/{agent}/toggle-availability', [AgentWorkloadController::class, 'toggleAvailability'])
+            ->name('agents.toggle_availability');
     });
 });
 

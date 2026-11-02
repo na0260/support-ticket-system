@@ -37,44 +37,42 @@
 
                     <!-- Priority Selection -->
                     <div>
-                        <x-input-label for="priority" :value="__('Priority Level')" />
-                        <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                            @foreach ($priorities as $priorityCase)
-                                @php
-                                    $hours = $priorityCase->slaHours();
-                                    $colorBadge = match($priorityCase->color()) {
-                                        'red' => 'border-red-400 peer-checked:border-red-600 peer-checked:bg-red-50 text-red-700',
-                                        'amber' => 'border-amber-400 peer-checked:border-amber-600 peer-checked:bg-amber-50 text-amber-700',
-                                        'blue' => 'border-blue-400 peer-checked:border-blue-600 peer-checked:bg-blue-50 text-blue-700',
-                                        default => 'border-gray-300 peer-checked:border-gray-500 peer-checked:bg-gray-50 text-gray-700',
-                                    };
-                                @endphp
-                                <label class="relative flex flex-col p-4 border rounded-lg cursor-pointer hover:bg-gray-50 transition-all {{ $colorBadge }}">
-                                    <input type="radio" name="priority" value="{{ $priorityCase->value }}"
-                                           class="sr-only peer"
-                                           @checked(old('priority', \App\Enums\TicketPriority::MEDIUM->value) === $priorityCase->value)
-                                           required>
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-sm font-semibold capitalize">{{ $priorityCase->label() }}</span>
-                                        <span class="text-xs px-2 py-0.5 rounded bg-white shadow-sm font-mono border">
-                                            {{ $hours }}h SLA
-                                        </span>
-                                    </div>
-                                    <span class="text-xs text-gray-500 mt-2">
-                                        @if ($priorityCase->value === 'critical')
-                                            {{ __('System down or blocker') }}
-                                        @elseif ($priorityCase->value === 'high')
-                                            {{ __('Core feature impacted') }}
-                                        @elseif ($priorityCase->value === 'medium')
-                                            {{ __('Normal operational query') }}
-                                        @else
-                                            {{ __('Low priority inquiry') }}
-                                        @endif
-                                    </span>
-                                </label>
-                            @endforeach
-                        </div>
+                        <x-input-label for="priority" :value="__('Priority Level & SLA Commitment')" />
+                        <select id="priority" name="priority" required class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm @error('priority') border-red-500 ring-red-500 @enderror">
+                            <option value="low" @selected(old('priority') === 'low')>
+                                {{ __('Low: 48 Hours Resolution SLA') }}
+                            </option>
+                            <option value="medium" @selected(old('priority', \App\Enums\TicketPriority::MEDIUM->value) === 'medium')>
+                                {{ __('Medium: 24 Hours Resolution SLA') }}
+                            </option>
+                            <option value="high" @selected(old('priority') === 'high')>
+                                {{ __('High: 8 Hours Resolution SLA') }}
+                            </option>
+                            <option value="critical" @selected(old('priority') === 'critical')>
+                                {{ __('Critical: 2 Hours Resolution SLA') }}
+                            </option>
+                        </select>
                         <x-input-error class="mt-2" :messages="$errors->get('priority')" />
+
+                        <!-- Priority Reference Badges -->
+                        <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                            <div class="p-2.5 rounded-md border border-gray-200 bg-gray-50 text-gray-700">
+                                <span class="font-semibold block">{{ __('Low') }}</span>
+                                <span class="text-gray-500">{{ __('48h Resolution SLA') }}</span>
+                            </div>
+                            <div class="p-2.5 rounded-md border border-blue-200 bg-blue-50 text-blue-700">
+                                <span class="font-semibold block">{{ __('Medium') }}</span>
+                                <span class="text-blue-600">{{ __('24h Resolution SLA') }}</span>
+                            </div>
+                            <div class="p-2.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700">
+                                <span class="font-semibold block">{{ __('High') }}</span>
+                                <span class="text-amber-600">{{ __('8h Resolution SLA') }}</span>
+                            </div>
+                            <div class="p-2.5 rounded-md border border-red-200 bg-red-50 text-red-700">
+                                <span class="font-semibold block">{{ __('Critical') }}</span>
+                                <span class="text-red-600">{{ __('2h Resolution SLA') }}</span>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Subject -->
