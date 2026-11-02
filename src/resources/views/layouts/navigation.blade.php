@@ -48,6 +48,12 @@
                             {{ __('Agent Workload') }}
                         </x-nav-link>
                     @endif
+
+                    @if (Auth::user()?->role?->isStaff())
+                        <x-nav-link :href="route('imports.index')" :active="request()->routeIs('imports.*')">
+                            {{ __('CSV Import') }}
+                        </x-nav-link>
+                    @endif
                 </div>
             </div>
 
@@ -147,6 +153,12 @@
                 </x-responsive-nav-link>
                 <x-responsive-nav-link :href="route('admin.agents.workload')" :active="request()->routeIs('admin.agents.workload')">
                     {{ __('Agent Workload') }}
+                </x-responsive-nav-link>
+            @endif
+
+            @if (Auth::user()?->role?->isStaff())
+                <x-responsive-nav-link :href="route('imports.index')" :active="request()->routeIs('imports.*')">
+                    {{ __('CSV Import') }}
                 </x-responsive-nav-link>
             @endif
         </div>

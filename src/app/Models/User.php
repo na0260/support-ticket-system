@@ -91,6 +91,14 @@ class User extends Authenticatable
     }
 
     /**
+     * @return HasMany<TicketImport, $this>
+     */
+    public function ticketImports(): HasMany
+    {
+        return $this->hasMany(TicketImport::class);
+    }
+
+    /**
      * @param  Builder<self>  $query
      */
     public function scopeAgents(Builder $query): void

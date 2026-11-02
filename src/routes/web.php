@@ -6,6 +6,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\TicketAttachmentController;
 use App\Http\Controllers\TicketController;
+use App\Http\Controllers\TicketImportController;
 use App\Http\Controllers\TicketMessageController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Route;
@@ -89,6 +90,15 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/attachments/{attachment}/download', [TicketAttachmentController::class, 'download'])
         ->middleware('can:download,attachment')
         ->name('ticket_attachments.download');
+
+    // CSV Bulk Ticket Import (Staff Only: Agent & Admin)
+    Route::middleware('role:agent,admin')->group(function (): void {
+        Route::get('/imports', [TicketImportController::class, 'index'])->name('imports.index');
+        Route::post('/imports', [TicketImportController::class, 'store'])->name('imports.store');
+        Route::get('/imports/sample', [TicketImportController::class, 'downloadSample'])->name('imports.sample');
+        Route::get('/imports/{import}', [TicketImportController::class, 'show'])->name('imports.show');
+        Route::get('/imports/{import}/failures', [TicketImportController::class, 'downloadFailures'])->name('imports.failures');
+    });
 
     // Role-Guarded Staff Workspace: Agent & Admin
     Route::middleware('role:agent,admin')->prefix('agent')->name('agent.')->group(function (): void {
