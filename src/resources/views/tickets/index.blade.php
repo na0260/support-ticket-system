@@ -164,7 +164,17 @@
                                                     <span>{{ $ticket->assignedAgent->name }}</span>
                                                 </div>
                                             @else
-                                                <span class="italic text-gray-400">{{ __('Unassigned') }}</span>
+                                                <div class="flex items-center gap-2">
+                                                    <span class="italic text-gray-400">{{ __('Unassigned') }}</span>
+                                                    @can('claim', $ticket)
+                                                        <form action="{{ route('tickets.claim', $ticket) }}" method="POST" class="inline">
+                                                            @csrf
+                                                            <button type="submit" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-colors">
+                                                                {{ __('Claim') }}
+                                                            </button>
+                                                        </form>
+                                                    @endcan
+                                                </div>
                                             @endif
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

@@ -389,9 +389,20 @@
 
                     <!-- Assigned Agent Card -->
                     <div class="bg-white shadow-sm sm:rounded-lg border border-gray-200 p-6 space-y-4">
-                        <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider border-b border-gray-100 pb-2">
-                            {{ __('Assigned Agent') }}
-                        </h3>
+                        <div class="flex items-center justify-between border-b border-gray-100 pb-2">
+                            <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+                                {{ __('Assigned Agent') }}
+                            </h3>
+                            @if ($ticket->assignedAgent)
+                                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+                                    {{ __('Assigned') }}
+                                </span>
+                            @else
+                                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
+                                    {{ __('Unassigned') }}
+                                </span>
+                            @endif
+                        </div>
 
                         <div class="flex items-center gap-3">
                             <div class="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm">
@@ -407,25 +418,46 @@
                             </div>
                         </div>
 
-                        <!-- Staff Claim Button -->
-                        @can('claim', $ticket)
-                            <form action="{{ route('tickets.claim', $ticket) }}" method="POST" class="pt-2">
-                                @csrf
-                                <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-md font-semibold text-xs text-indigo-700 hover:bg-indigo-100 transition-colors">
-                                    {{ __('Claim This Ticket') }}
-                                </button>
-                            </form>
-                        @endcan
+                        <!-- Unassigned Actions: Claim & Auto-Assign -->
+                        @if ($ticket->assigned_agent_id === null && $ticket->status !== \App\Enums\TicketStatus::CLOSED)
+                            <div class="pt-2 space-y-2">
+                                @can('claim', $ticket)
+                                    <form action="{{ route('tickets.claim', $ticket) }}" method="POST">
+                                        @csrf
+                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-semibold text-xs uppercase tracking-wider transition-colors shadow-sm">
+                                            <svg class="w-4 h-4 me-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                            </svg>
+                                            {{ __('Claim Ticket') }}
+                                        </button>
+                                    </form>
+                                @endcan
 
-                        <!-- Staff Assign to Agent Form -->
+                                @can('assign', $ticket)
+                                    <form action="{{ route('tickets.auto_assign', $ticket) }}" method="POST">
+                                        @csrf
+                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-md font-semibold text-xs uppercase tracking-wider transition-colors">
+                                            <svg class="w-4 h-4 me-1.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                            </svg>
+                                            {{ __('Auto-Assign (Strategy)') }}
+                                        </button>
+                                    </form>
+                                @endcan
+                            </div>
+                        @endif
+
+                        <!-- Staff Assign / Reassign Form -->
                         @can('assign', $ticket)
-                            @if ($agents->isNotEmpty())
+                            @if ($agents->isNotEmpty() && $ticket->status !== \App\Enums\TicketStatus::CLOSED)
                                 <form action="{{ route('tickets.assign', $ticket) }}" method="POST" class="pt-2 space-y-2 border-t border-gray-100">
                                     @csrf
-                                    <label for="assigned_agent_id" class="block text-xs font-medium text-gray-700">{{ __('Reassign Agent') }}</label>
+                                    <label for="assigned_agent_id" class="block text-xs font-medium text-gray-700">
+                                        {{ $ticket->assigned_agent_id ? __('Reassign Agent') : __('Manual Assignment') }}
+                                    </label>
                                     <div class="flex gap-2">
                                         <select id="assigned_agent_id" name="assigned_agent_id" class="block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md text-xs shadow-sm">
-                                            <option value="">{{ __('Unassign') }}</option>
+                                            <option value="">{{ __('Unassigned') }}</option>
                                             @foreach ($agents as $agent)
                                                 <option value="{{ $agent->id }}" @selected($ticket->assigned_agent_id === $agent->id)>
                                                     {{ $agent->name }} ({{ ucfirst($agent->role->value) }})

@@ -55,6 +55,10 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('can:assign,ticket')
         ->name('tickets.assign');
 
+    Route::post('/tickets/{ticket}/auto-assign', [TicketController::class, 'autoAssign'])
+        ->middleware('can:assign,ticket')
+        ->name('tickets.auto_assign');
+
     Route::post('/tickets/{ticket}/claim', [TicketController::class, 'claim'])
         ->middleware('can:claim,ticket')
         ->name('tickets.claim');

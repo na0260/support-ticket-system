@@ -7,12 +7,14 @@ namespace App\Http\Controllers;
 use App\Enums\SlaStatus;
 use App\Enums\TicketPriority;
 use App\Enums\TicketStatus;
+use App\Exceptions\TicketAlreadyAssignedException;
 use App\Http\Requests\StoreTicketRequest;
 use App\Http\Requests\UpdateTicketRequest;
 use App\Models\Ticket;
 use App\Models\TicketActivity;
 use App\Models\TicketCategory;
 use App\Models\User;
+use App\Services\Assignment\TicketAssignmentService;
 use App\Services\AttachmentService;
 use App\Services\Sla\BusinessHoursCalculator;
 use App\Services\TicketNumberGenerator;
@@ -99,6 +101,7 @@ final class TicketController extends Controller
         TicketNumberGenerator $numberGen,
         BusinessHoursCalculator $slaCalc,
         AttachmentService $attachmentService,
+        TicketAssignmentService $assignmentService,
     ): RedirectResponse|JsonResponse {
         /** @var User $user */
         $user = $request->user();
@@ -150,6 +153,15 @@ final class TicketController extends Controller
 
             return $ticket;
         });
+
+        // Trigger automatic assignment on creation if configured
+        if ((bool) config('tickets.assignment.auto_assign_on_creation')) {
+            try {
+                $assignmentService->autoAssign($ticket);
+            } catch (TicketAlreadyAssignedException) {
+                // Safeguard against concurrent race
+            }
+        }
 
         if ($request->wantsJson()) {
             return response()->json([
@@ -310,10 +322,13 @@ final class TicketController extends Controller
     }
 
     /**
-     * Assign ticket to an agent.
+     * Assign ticket to an agent (or unassign).
      */
-    public function assign(Request $request, Ticket $ticket): RedirectResponse|Response|JsonResponse
-    {
+    public function assign(
+        Request $request,
+        Ticket $ticket,
+        TicketAssignmentService $assignmentService,
+    ): RedirectResponse|Response|JsonResponse {
         Gate::authorize('assign', $ticket);
 
         /** @var User $user */
@@ -325,25 +340,22 @@ final class TicketController extends Controller
         ]);
 
         $agentInput = $validated['assigned_agent_id'] ?? $validated['agent_id'] ?? null;
-        $newAgentId = $agentInput !== null ? (int) $agentInput : null;
+        $agent = $agentInput !== null ? User::find((int) $agentInput) : null;
 
-        $previousAgentId = $ticket->assigned_agent_id;
+        try {
+            $assignmentService->assign($ticket, $agent, $user);
+        } catch (TicketAlreadyAssignedException $e) {
+            if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
+                return response()->json([
+                    'message' => 'This ticket has already been claimed or assigned to another agent.',
+                    'error' => $e->getMessage(),
+                ], 409);
+            }
 
-        $ticket->assigned_agent_id = $newAgentId;
-        if ($newAgentId !== null && $ticket->status === TicketStatus::OPEN) {
-            $ticket->status = TicketStatus::IN_PROGRESS;
+            return redirect()
+                ->route('tickets.show', $ticket)
+                ->with('error', 'This ticket was just claimed or assigned to another agent.');
         }
-        $ticket->save();
-
-        TicketActivity::query()->create([
-            'ticket_id' => $ticket->id,
-            'causer_id' => $user->id,
-            'event' => 'ticket_assigned',
-            'properties' => [
-                'from' => $previousAgentId,
-                'to' => $newAgentId,
-            ],
-        ]);
 
         if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
             return response()->json(['message' => 'Ticket assignment updated.']);
@@ -357,27 +369,30 @@ final class TicketController extends Controller
     /**
      * Agent claims an unassigned ticket.
      */
-    public function claim(Request $request, Ticket $ticket): RedirectResponse|Response|JsonResponse
-    {
+    public function claim(
+        Request $request,
+        Ticket $ticket,
+        TicketAssignmentService $assignmentService,
+    ): RedirectResponse|Response|JsonResponse {
         Gate::authorize('claim', $ticket);
 
         /** @var User $user */
         $user = $request->user();
 
-        $ticket->assigned_agent_id = $user->id;
-        if ($ticket->status === TicketStatus::OPEN) {
-            $ticket->status = TicketStatus::IN_PROGRESS;
-        }
-        $ticket->save();
+        try {
+            $assignmentService->claim($ticket, $user);
+        } catch (TicketAlreadyAssignedException $e) {
+            if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
+                return response()->json([
+                    'message' => 'This ticket has already been claimed or assigned to another agent.',
+                    'error' => $e->getMessage(),
+                ], 409);
+            }
 
-        TicketActivity::query()->create([
-            'ticket_id' => $ticket->id,
-            'causer_id' => $user->id,
-            'event' => 'ticket_claimed',
-            'properties' => [
-                'claimed_by' => $user->id,
-            ],
-        ]);
+            return redirect()
+                ->route('tickets.show', $ticket)
+                ->with('error', 'This ticket was just claimed or assigned to another agent.');
+        }
 
         if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
             return response()->json(['message' => 'Ticket claimed successfully.']);
@@ -386,6 +401,65 @@ final class TicketController extends Controller
         return redirect()
             ->route('tickets.show', $ticket)
             ->with('status', 'Ticket claimed successfully.');
+    }
+
+    /**
+     * Automatically assign a ticket using the configured strategy.
+     */
+    public function autoAssign(
+        Request $request,
+        Ticket $ticket,
+        TicketAssignmentService $assignmentService,
+    ): RedirectResponse|Response|JsonResponse {
+        Gate::authorize('assign', $ticket);
+
+        /** @var User $user */
+        $user = $request->user();
+
+        $strategyName = $request->input('strategy');
+
+        try {
+            $assignedAgent = $assignmentService->autoAssign(
+                $ticket,
+                is_string($strategyName) ? $strategyName : null,
+                $user,
+            );
+        } catch (TicketAlreadyAssignedException $e) {
+            if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
+                return response()->json([
+                    'message' => 'This ticket has already been claimed or assigned to another agent.',
+                    'error' => $e->getMessage(),
+                ], 409);
+            }
+
+            return redirect()
+                ->route('tickets.show', $ticket)
+                ->with('error', 'This ticket was just claimed or assigned to another agent.');
+        }
+
+        if ($assignedAgent === null) {
+            if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
+                return response()->json([
+                    'message' => 'No available agents for assignment at this time.',
+                    'assigned_agent' => null,
+                ], 200);
+            }
+
+            return redirect()
+                ->route('tickets.show', $ticket)
+                ->with('status', 'No available agents found for automatic assignment.');
+        }
+
+        if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
+            return response()->json([
+                'message' => 'Ticket automatically assigned successfully.',
+                'assigned_agent' => $assignedAgent,
+            ], 200);
+        }
+
+        return redirect()
+            ->route('tickets.show', $ticket)
+            ->with('status', "Ticket automatically assigned to {$assignedAgent->name}.");
     }
 
     /**
