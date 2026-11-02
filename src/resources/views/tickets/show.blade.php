@@ -502,13 +502,52 @@
 
                     <!-- Audit Trail / Activity Stream -->
                     <div class="bg-white shadow-sm sm:rounded-lg border border-gray-200 p-6 space-y-4">
-                        <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider border-b border-gray-100 pb-2">
-                            {{ __('Activity Log') }}
-                        </h3>
+                        <div class="flex items-center justify-between border-b border-gray-100 pb-2">
+                            <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+                                {{ __('Activity Log') }}
+                            </h3>
+                            <span class="text-xs text-gray-500 font-medium">
+                                {{ $ticket->activities->count() }} {{ __('events') }}
+                            </span>
+                        </div>
 
                         <div class="flow-root">
                             <ul role="list" class="-mb-6">
                                 @forelse ($ticket->activities as $activity)
+                                    @php
+                                        $causer = $activity->causer;
+                                        $isSystem = $causer === null;
+                                        $props = $activity->properties ?? [];
+                                        $timeStr = $activity->created_at->format('g:i A');
+
+                                        $eventDescription = match($activity->event) {
+                                            'ticket_created' => "Ticket created by " . ($causer?->name ?? 'User'),
+                                            'ticket_assigned' => isset($props['to']) && $props['to'] !== null
+                                                ? "Assigned to Agent"
+                                                : "Ticket unassigned",
+                                            'ticket_claimed' => "Claimed by " . ($causer?->name ?? 'Agent'),
+                                            'ticket_auto_assigned' => "Automatically assigned via " . ($props['strategy'] ?? 'strategy'),
+                                            'priority_changed' => "Priority changed from " . ucfirst($props['old_priority'] ?? '') . " to " . ucfirst($props['new_priority'] ?? ''),
+                                            'status_changed' => "Status changed from " . ucwords(str_replace('_', ' ', $props['old_status'] ?? '')) . " to " . ucwords(str_replace('_', ' ', $props['new_status'] ?? '')),
+                                            'customer_replied' => "Customer replied",
+                                            'agent_replied' => "Agent replied",
+                                            'internal_note_added' => "Internal note added",
+                                            'ticket_escalated' => "Ticket escalated (" . ($props['reason'] ?? 'SLA Breached') . ")",
+                                            'sla_approaching_breach' => "SLA warning (80% threshold reached)",
+                                            'ticket_resolved' => "Marked as Resolved",
+                                            'ticket_closed' => "Ticket permanently closed",
+                                            'ticket_reopened' => "Ticket reopened",
+                                            default => ucwords(str_replace('_', ' ', $activity->event)),
+                                        };
+
+                                        $badgeClasses = match(true) {
+                                            str_contains($activity->event, 'escalat') || str_contains($activity->event, 'breach') => 'bg-red-50 text-red-700 border-red-200',
+                                            str_contains($activity->event, 'resolved') => 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                                            str_contains($activity->event, 'assigned') || str_contains($activity->event, 'claimed') => 'bg-indigo-50 text-indigo-700 border-indigo-200',
+                                            str_contains($activity->event, 'reply') || str_contains($activity->event, 'replied') => 'bg-sky-50 text-sky-700 border-sky-200',
+                                            default => 'bg-gray-50 text-gray-700 border-gray-200',
+                                        };
+                                    @endphp
                                     <li>
                                         <div class="relative pb-6">
                                             @if (! $loop->last)
@@ -516,21 +555,35 @@
                                             @endif
                                             <div class="relative flex space-x-3">
                                                 <div>
-                                                    <span class="h-8 w-8 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-xs font-semibold text-indigo-700">
-                                                        {{ substr($activity->causer?->name ?? 'S', 0, 1) }}
+                                                    <span class="h-8 w-8 rounded-full border flex items-center justify-center text-xs font-semibold {{ $badgeClasses }}">
+                                                        @if ($isSystem)
+                                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                                            </svg>
+                                                        @else
+                                                            {{ substr($causer->name, 0, 1) }}
+                                                        @endif
                                                     </span>
                                                 </div>
-                                                <div class="min-w-0 flex-1 pt-1.5 flex justify-between space-x-4">
+                                                <div class="min-w-0 flex-1 pt-1 flex justify-between space-x-4">
                                                     <div>
-                                                        <p class="text-xs text-gray-800 font-medium">
-                                                            {{ ucwords(str_replace('_', ' ', $activity->event)) }}
+                                                        <p class="text-xs text-gray-900 font-semibold">
+                                                            {{ $timeStr }} &ndash; {{ $eventDescription }}
                                                         </p>
                                                         <p class="text-[11px] text-gray-500">
-                                                            {{ __('By') }} {{ $activity->causer?->name ?? __('System') }}
+                                                            @if ($isSystem)
+                                                                <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-gray-100 text-gray-600">
+                                                                    {{ __('System') }}
+                                                                </span>
+                                                            @else
+                                                                {{ __('By') }} {{ $causer->name }}
+                                                            @endif
                                                         </p>
                                                     </div>
                                                     <div class="text-right text-[11px] whitespace-nowrap text-gray-400">
-                                                        <time datetime="{{ $activity->created_at->toIso8601String() }}">{{ $activity->created_at->diffForHumans(short: true) }}</time>
+                                                        <time datetime="{{ $activity->created_at->toIso8601String() }}" title="{{ $activity->created_at->format('Y-m-d H:i:s') }}">
+                                                            {{ $activity->created_at->diffForHumans(short: true) }}
+                                                        </time>
                                                     </div>
                                                 </div>
                                             </div>

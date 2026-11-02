@@ -7,13 +7,13 @@ namespace App\Http\Controllers;
 use App\Enums\TicketStatus;
 use App\Http\Requests\StoreTicketMessageRequest;
 use App\Models\Ticket;
-use App\Models\TicketActivity;
 use App\Models\TicketMessage;
 use App\Models\User;
+use App\Notifications\TicketRepliedNotification;
+use App\Services\Activity\TicketActivityLogger;
 use App\Services\AttachmentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -44,6 +44,7 @@ final class TicketMessageController extends Controller
         StoreTicketMessageRequest $request,
         Ticket $ticket,
         AttachmentService $attachmentService,
+        TicketActivityLogger $activityLogger,
     ): RedirectResponse|Response|JsonResponse {
         /** @var User $user */
         $user = $request->user();
@@ -62,7 +63,7 @@ final class TicketMessageController extends Controller
             Gate::authorize('create', [TicketMessage::class, $ticket]);
         }
 
-        $message = DB::transaction(function () use ($validated, $user, $ticket, $isInternal, $attachmentService, $request): TicketMessage {
+        $message = DB::transaction(function () use ($validated, $user, $ticket, $isInternal, $attachmentService, $activityLogger, $request): TicketMessage {
             /** @var TicketMessage $msg */
             $msg = $ticket->messages()->create([
                 'user_id' => $user->id,
@@ -86,14 +87,9 @@ final class TicketMessageController extends Controller
                 $ticket->resolved_at = null;
                 $ticket->save();
 
-                TicketActivity::query()->create([
-                    'ticket_id' => $ticket->id,
-                    'causer_id' => $user->id,
-                    'event' => 'ticket_reopened',
-                    'properties' => [
-                        'reason' => 'customer_reply',
-                        'new_status' => $ticket->status->value,
-                    ],
+                $activityLogger->log($ticket, 'ticket_reopened', $user, [
+                    'reason' => 'customer_reply',
+                    'new_status' => $ticket->status->value,
                 ]);
             } elseif ($user->role->isStaff() && ! $isInternal) {
                 // 2. If agent replies publicly to an OPEN or WAITING_CUSTOMER ticket: transition status to WAITING_CUSTOMER
@@ -108,15 +104,20 @@ final class TicketMessageController extends Controller
                 ? 'internal_note_added'
                 : ($user->role->isCustomer() ? 'customer_replied' : 'agent_replied');
 
-            TicketActivity::query()->create([
-                'ticket_id' => $ticket->id,
-                'causer_id' => $user->id,
-                'event' => $activityEvent,
-                'properties' => [
-                    'message_id' => $msg->id,
-                    'is_internal' => $isInternal,
-                ],
+            $activityLogger->log($ticket, $activityEvent, $user, [
+                'message_id' => $msg->id,
+                'reply_length' => strlen($validated['body']),
+                'is_internal' => $isInternal,
             ]);
+
+            // Asynchronous queued notifications
+            if (! $isInternal) {
+                if ($user->role->isCustomer() && $ticket->assignedAgent !== null) {
+                    $ticket->assignedAgent->notify(new TicketRepliedNotification($ticket, $msg));
+                } elseif ($user->role->isStaff() && $ticket->creator !== null && $ticket->creator->id !== $user->id) {
+                    $ticket->creator->notify(new TicketRepliedNotification($ticket, $msg));
+                }
+            }
 
             return $msg;
         });
@@ -141,9 +142,10 @@ final class TicketMessageController extends Controller
         StoreTicketMessageRequest $request,
         Ticket $ticket,
         AttachmentService $attachmentService,
+        TicketActivityLogger $activityLogger,
     ): RedirectResponse|Response|JsonResponse {
         $request->merge(['is_internal' => true]);
 
-        return $this->store($request, $ticket, $attachmentService);
+        return $this->store($request, $ticket, $attachmentService, $activityLogger);
     }
 }

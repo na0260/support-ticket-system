@@ -7,8 +7,9 @@ namespace App\Services\Assignment;
 use App\Enums\TicketStatus;
 use App\Exceptions\TicketAlreadyAssignedException;
 use App\Models\Ticket;
-use App\Models\TicketActivity;
 use App\Models\User;
+use App\Notifications\TicketAssignedNotification;
+use App\Services\Activity\TicketActivityLogger;
 use Illuminate\Support\Facades\DB;
 
 class TicketAssignmentService
@@ -16,6 +17,7 @@ class TicketAssignmentService
     public function __construct(
         private readonly LeastWorkloadStrategy $workloadStrategy,
         private readonly RoundRobinStrategy $roundRobinStrategy,
+        private readonly TicketActivityLogger $activityLogger,
     ) {}
 
     /**
@@ -47,14 +49,9 @@ class TicketAssignmentService
                 $ticket->assigned_agent_id = null;
                 $ticket->save();
 
-                TicketActivity::query()->create([
-                    'ticket_id' => $ticket->id,
-                    'causer_id' => $causer?->id,
-                    'event' => 'ticket_assigned',
-                    'properties' => [
-                        'from' => $previousAgentId,
-                        'to' => null,
-                    ],
+                $this->activityLogger->log($ticket, 'ticket_assigned', $causer, [
+                    'from' => $previousAgentId,
+                    'to' => null,
                 ]);
 
                 return $ticket;
@@ -88,15 +85,16 @@ class TicketAssignmentService
                 $ticket->save();
             }
 
-            TicketActivity::query()->create([
-                'ticket_id' => $ticket->id,
-                'causer_id' => $causer?->id,
-                'event' => 'ticket_assigned',
-                'properties' => [
-                    'from' => $previousAgentId,
-                    'to' => $agent->id,
-                ],
+            $this->activityLogger->log($ticket, 'ticket_assigned', $causer, [
+                'from' => $previousAgentId,
+                'to' => $agent->id,
+                'assigned_agent_id' => $agent->id,
             ]);
+
+            // Notify assigned agent
+            if ($causer === null || $agent->id !== $causer->id) {
+                $agent->notify(new TicketAssignedNotification($ticket));
+            }
 
             return $ticket;
         });
@@ -134,14 +132,12 @@ class TicketAssignmentService
 
             $ticket->refresh();
 
-            TicketActivity::query()->create([
-                'ticket_id' => $ticket->id,
-                'causer_id' => $agent->id,
-                'event' => 'ticket_claimed',
-                'properties' => [
-                    'claimed_by' => $agent->id,
-                ],
+            $this->activityLogger->log($ticket, 'ticket_claimed', $agent, [
+                'claimed_by' => $agent->id,
+                'assigned_agent_id' => $agent->id,
             ]);
+
+            $agent->notify(new TicketAssignedNotification($ticket));
 
             return $ticket;
         });
@@ -164,14 +160,9 @@ class TicketAssignmentService
         $candidate = $strategy->pickAgent($ticket);
 
         if ($candidate === null) {
-            TicketActivity::query()->create([
-                'ticket_id' => $ticket->id,
-                'causer_id' => $causer?->id,
-                'event' => 'ticket_auto_assignment_failed',
-                'properties' => [
-                    'reason' => 'no_available_agents',
-                    'strategy' => $strategyKey,
-                ],
+            $this->activityLogger->log($ticket, 'ticket_auto_assignment_failed', $causer, [
+                'reason' => 'no_available_agents',
+                'strategy' => $strategyKey,
             ]);
 
             return null;
@@ -196,15 +187,12 @@ class TicketAssignmentService
 
             $ticket->refresh();
 
-            TicketActivity::query()->create([
-                'ticket_id' => $ticket->id,
-                'causer_id' => $causer?->id,
-                'event' => 'ticket_auto_assigned',
-                'properties' => [
-                    'strategy' => $strategyKey,
-                    'assigned_agent_id' => $candidate->id,
-                ],
+            $this->activityLogger->log($ticket, 'ticket_auto_assigned', $causer, [
+                'strategy' => $strategyKey,
+                'assigned_agent_id' => $candidate->id,
             ]);
+
+            $candidate->notify(new TicketAssignedNotification($ticket));
 
             return $candidate;
         });

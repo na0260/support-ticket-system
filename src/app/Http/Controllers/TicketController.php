@@ -11,9 +11,11 @@ use App\Exceptions\TicketAlreadyAssignedException;
 use App\Http\Requests\StoreTicketRequest;
 use App\Http\Requests\UpdateTicketRequest;
 use App\Models\Ticket;
-use App\Models\TicketActivity;
 use App\Models\TicketCategory;
 use App\Models\User;
+use App\Notifications\TicketCreatedNotification;
+use App\Notifications\TicketResolvedNotification;
+use App\Services\Activity\TicketActivityLogger;
 use App\Services\Assignment\TicketAssignmentService;
 use App\Services\AttachmentService;
 use App\Services\Sla\BusinessHoursCalculator;
@@ -102,6 +104,7 @@ final class TicketController extends Controller
         BusinessHoursCalculator $slaCalc,
         AttachmentService $attachmentService,
         TicketAssignmentService $assignmentService,
+        TicketActivityLogger $activityLogger,
     ): RedirectResponse|JsonResponse {
         /** @var User $user */
         $user = $request->user();
@@ -110,7 +113,7 @@ final class TicketController extends Controller
         $priority = TicketPriority::from($validated['priority']);
         $now = now();
 
-        $ticket = DB::transaction(function () use ($validated, $user, $priority, $now, $numberGen, $slaCalc, $attachmentService, $request): Ticket {
+        $ticket = DB::transaction(function () use ($validated, $user, $priority, $now, $numberGen, $slaCalc, $attachmentService, $activityLogger, $request): Ticket {
             $ticketNumber = $numberGen->generate();
             $dueAt = $slaCalc->calculateDueAt($now, $priority);
             $warningAt = $slaCalc->calculateWarningAt($now, $dueAt);
@@ -140,19 +143,18 @@ final class TicketController extends Controller
             }
 
             // Log initial audit activity
-            TicketActivity::query()->create([
-                'ticket_id' => $ticket->id,
-                'causer_id' => $user->id,
-                'event' => 'ticket_created',
-                'properties' => [
-                    'ticket_number' => $ticket->ticket_number,
-                    'priority' => $ticket->priority->value,
-                    'category_id' => $ticket->category_id,
-                ],
+            $activityLogger->log($ticket, 'ticket_created', $user, [
+                'ticket_number' => $ticket->ticket_number,
+                'priority' => $ticket->priority->value,
+                'category_id' => $ticket->category_id,
+                'sla_due_at' => $dueAt->toIso8601String(),
             ]);
 
             return $ticket;
         });
+
+        // Send queued notification to customer
+        $user->notify(new TicketCreatedNotification($ticket));
 
         // Trigger automatic assignment on creation if configured
         if ((bool) config('tickets.assignment.auto_assign_on_creation')) {
@@ -237,8 +239,12 @@ final class TicketController extends Controller
     /**
      * Update ticket attributes and log audit history.
      */
-    public function update(UpdateTicketRequest $request, Ticket $ticket): RedirectResponse|Response|JsonResponse
-    {
+    public function update(
+        UpdateTicketRequest $request,
+        Ticket $ticket,
+        TicketActivityLogger $activityLogger,
+        BusinessHoursCalculator $slaCalc,
+    ): RedirectResponse|Response|JsonResponse {
         Gate::authorize('update', $ticket);
 
         /** @var User $user */
@@ -247,7 +253,7 @@ final class TicketController extends Controller
 
         $changes = [];
 
-        DB::transaction(function () use ($validated, $user, $ticket, &$changes): void {
+        DB::transaction(function () use ($validated, $user, $ticket, $activityLogger, $slaCalc, &$changes): void {
             if ($user->role->isCustomer()) {
                 if (isset($validated['subject']) && $validated['subject'] !== $ticket->subject) {
                     $changes['subject'] = ['from' => $ticket->subject, 'to' => $validated['subject']];
@@ -272,23 +278,41 @@ final class TicketController extends Controller
                     $ticket->category_id = (int) $validated['category_id'];
                 }
                 if (isset($validated['priority']) && $validated['priority'] !== $ticket->priority->value) {
-                    $changes['priority'] = ['from' => $ticket->priority->value, 'to' => $validated['priority']];
-                    $ticket->priority = TicketPriority::from($validated['priority']);
+                    $oldPriority = $ticket->priority;
+                    $newPriority = TicketPriority::from($validated['priority']);
+                    $changes['priority'] = ['from' => $oldPriority->value, 'to' => $newPriority->value];
+                    $ticket->priority = $newPriority;
+
+                    // Recalculate SLA due dates
+                    $newDueAt = $slaCalc->calculateDueAt($ticket->created_at, $newPriority);
+                    $newWarningAt = $slaCalc->calculateWarningAt($ticket->created_at, $newDueAt);
+                    $ticket->sla_due_at = $newDueAt;
+                    $ticket->sla_warning_at = $newWarningAt;
+
+                    $activityLogger->log($ticket, 'priority_changed', $user, [
+                        'old_priority' => $oldPriority->value,
+                        'new_priority' => $newPriority->value,
+                        'sla_due_at' => $newDueAt->toIso8601String(),
+                    ]);
                 }
                 if (isset($validated['status']) && $validated['status'] !== $ticket->status->value) {
-                    $changes['status'] = ['from' => $ticket->status->value, 'to' => $validated['status']];
-                    $ticket->status = TicketStatus::from($validated['status']);
+                    $oldStatus = $ticket->status;
+                    $newStatus = TicketStatus::from($validated['status']);
+                    $changes['status'] = ['from' => $oldStatus->value, 'to' => $newStatus->value];
+                    $ticket->status = $newStatus;
+
+                    $activityLogger->log($ticket, 'status_changed', $user, [
+                        'old_status' => $oldStatus->value,
+                        'new_status' => $newStatus->value,
+                    ]);
                 }
             }
 
             if ($changes !== []) {
                 $ticket->save();
 
-                TicketActivity::query()->create([
-                    'ticket_id' => $ticket->id,
-                    'causer_id' => $user->id,
-                    'event' => 'ticket_updated',
-                    'properties' => ['changes' => $changes],
+                $activityLogger->log($ticket, 'ticket_updated', $user, [
+                    'changes' => $changes,
                 ]);
             }
         });
@@ -465,8 +489,11 @@ final class TicketController extends Controller
     /**
      * Resolve the ticket.
      */
-    public function resolve(Request $request, Ticket $ticket): RedirectResponse|Response|JsonResponse
-    {
+    public function resolve(
+        Request $request,
+        Ticket $ticket,
+        TicketActivityLogger $activityLogger,
+    ): RedirectResponse|Response|JsonResponse {
         Gate::authorize('resolve', $ticket);
 
         /** @var User $user */
@@ -476,14 +503,14 @@ final class TicketController extends Controller
         $ticket->resolved_at = now();
         $ticket->save();
 
-        TicketActivity::query()->create([
-            'ticket_id' => $ticket->id,
-            'causer_id' => $user->id,
-            'event' => 'ticket_resolved',
-            'properties' => [
-                'resolved_at' => $ticket->resolved_at->toIso8601String(),
-            ],
+        $activityLogger->log($ticket, 'ticket_resolved', $user, [
+            'resolved_at' => $ticket->resolved_at->toIso8601String(),
         ]);
+
+        // Send queued notification to customer
+        if ($ticket->creator !== null) {
+            $ticket->creator->notify(new TicketResolvedNotification($ticket));
+        }
 
         if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
             return response()->json(['message' => 'Ticket marked as resolved.']);
@@ -497,8 +524,11 @@ final class TicketController extends Controller
     /**
      * Close the ticket.
      */
-    public function close(Request $request, Ticket $ticket): RedirectResponse|Response|JsonResponse
-    {
+    public function close(
+        Request $request,
+        Ticket $ticket,
+        TicketActivityLogger $activityLogger,
+    ): RedirectResponse|Response|JsonResponse {
         Gate::authorize('close', $ticket);
 
         /** @var User $user */
@@ -508,13 +538,8 @@ final class TicketController extends Controller
         $ticket->closed_at = now();
         $ticket->save();
 
-        TicketActivity::query()->create([
-            'ticket_id' => $ticket->id,
-            'causer_id' => $user->id,
-            'event' => 'ticket_closed',
-            'properties' => [
-                'closed_at' => $ticket->closed_at->toIso8601String(),
-            ],
+        $activityLogger->log($ticket, 'ticket_closed', $user, [
+            'closed_at' => $ticket->closed_at->toIso8601String(),
         ]);
 
         if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
