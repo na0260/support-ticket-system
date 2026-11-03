@@ -17,36 +17,37 @@ The system runs across 6 containerized services orchestrated via Docker Compose 
 
 ```mermaid
 flowchart TD
-    subgraph Client["Client Browser / API Consumer"]
-        Browser["User Web Browser"]
-    end
+  subgraph Client["Client Browser / API Consumer"]
+    Browser["User Web Browser"]
+  end
 
-    subgraph Host["Host Machine Network"]
-        PortHTTP["Port 8090 (Nginx HTTP)"]
-        PortDB["Port 3307 (MySQL)"]
-        PortRedis["Port 6380 (Redis)"]
-    end
+  subgraph Host["Host Machine Network"]
+    PortHTTP["Port 8090 (Nginx HTTP)"]
+    PortDB["Port 3307 (MySQL)"]
+    PortRedis["Port 6380 (Redis)"]
+  end
 
-    subgraph DockerNet["ticket_network (Docker Bridge)"]
-        Nginx["ticket_nginx (Nginx 1.27 Alpine)"]
-        App["ticket_app (PHP 8.3 FPM Alpine)"]
-        Worker["ticket_queue_worker (Queue Worker)"]
-        Scheduler["ticket_scheduler (Cron Scheduler)"]
-        DB[("ticket_db (MySQL 8.0)\nNamed Vol: db_data")]
-        Redis[("ticket_redis (Redis 7)\nNamed Vol: redis_data")]
-    end
+  subgraph DockerNet["ticket_network (Docker Bridge)"]
+    Nginx["ticket_nginx (Nginx 1.27 Alpine)"]
+    App["ticket_app (PHP 8.3 FPM Alpine)"]
+    Worker["ticket_queue_worker (Queue Worker)"]
+    Scheduler["ticket_scheduler (Cron Scheduler)"]
+    DB[("ticket_db (MySQL 8.0)<br/>Named Vol: db_data")]
+    Redis[("ticket_redis (Redis 7)<br/>Named Vol: redis_data")]
+  end
 
-    Browser -->|HTTP Requests| PortHTTP --> Nginx
-    Nginx -->|FastCGI (9000)| App
+  Browser -->|"HTTP Requests"| PortHTTP
+  PortHTTP --> Nginx
+  Nginx -->|"FastCGI (9000)"| App
 
-    App -->|Read / Write (3306)| DB
-    App -->|Sessions, Cache, Queues (6379)| Redis
-    App -->|Pushes Jobs| Redis
+  App -->|"Read / Write (3306)"| DB
+  App -->|"Sessions, Cache, Queues (6379)"| Redis
+  App -->|"Pushes Jobs"| Redis
 
-    Redis -->|Consumes Jobs| Worker
-    Worker -->|Processes Async Imports / Emails| DB
+  Redis -->|"Consumes Jobs"| Worker
+  Worker -->|"Processes Async Imports / Emails"| DB
 
-    Scheduler -->|Every Minute: sla:check-escalations| App
+  Scheduler -->|"Every Minute: sla:check-escalations"| App
 ```
 
 ### Container Stack & Port Matrix
@@ -62,7 +63,183 @@ flowchart TD
 
 ---
 
-## 2. Local Setup Instructions
+## 2. Database Design & Entity Relationship (ER) Diagram
+
+The database architecture is designed with high normalization, strict referential integrity, event-sourcing-lite auditing, and multi-column composite indexing optimized for high concurrency.
+
+```mermaid
+erDiagram
+    USERS ||--o{ TICKETS : "creates (created_by)"
+    USERS |o--o{ TICKETS : "assigned to (assigned_agent_id)"
+    USERS ||--o{ TICKET_MESSAGES : "authors"
+    USERS |o--o{ TICKET_ACTIVITIES : "triggers (causer_id)"
+    USERS |o--o{ TICKET_ATTACHMENTS : "uploads (uploaded_by)"
+    USERS ||--o{ TICKET_IMPORTS : "initiates"
+
+    TICKET_CATEGORIES ||--o{ TICKETS : "categorizes"
+    SLA_POLICIES ||--o{ TICKETS : "governs SLA by priority"
+
+    TICKETS ||--o{ TICKET_MESSAGES : "contains"
+    TICKETS ||--o{ TICKET_ACTIVITIES : "tracks audit events"
+    TICKETS ||--o{ TICKET_ATTACHMENTS : "has (polymorphic)"
+    TICKET_MESSAGES ||--o{ TICKET_ATTACHMENTS : "has (polymorphic)"
+
+    TICKET_IMPORTS ||--o{ TICKET_IMPORT_FAILURES : "logs failures"
+
+    USERS {
+        bigint id PK
+        string name
+        string email UK
+        datetime email_verified_at
+        string password
+        string role "admin | agent | customer"
+        boolean is_available
+        string remember_token
+        datetime created_at
+        datetime updated_at
+    }
+
+    TICKET_CATEGORIES {
+        bigint id PK
+        string name
+        string slug UK
+        boolean is_active
+        datetime created_at
+        datetime updated_at
+    }
+
+    SLA_POLICIES {
+        bigint id PK
+        string priority UK "low | medium | high | critical"
+        int resolution_time_minutes
+        decimal warning_threshold_percentage
+        boolean business_hours_only
+        datetime created_at
+        datetime updated_at
+    }
+
+    TICKETS {
+        bigint id PK
+        string ticket_number UK "TKT-YYYY-NNNNNN"
+        bigint category_id FK
+        bigint created_by FK
+        bigint assigned_agent_id FK
+        string subject
+        text description
+        string priority "low | medium | high | critical"
+        string status "open | in_progress | waiting_customer | resolved | closed"
+        string sla_status "within_sla | approaching_breach | breached"
+        boolean is_escalated
+        datetime sla_due_at
+        datetime sla_warning_at
+        datetime escalated_at
+        datetime resolved_at
+        datetime closed_at
+        datetime created_at
+        datetime updated_at
+        datetime deleted_at
+    }
+
+    TICKET_MESSAGES {
+        bigint id PK
+        bigint ticket_id FK
+        bigint user_id FK
+        text body
+        boolean is_internal
+        datetime created_at
+        datetime updated_at
+    }
+
+    TICKET_ATTACHMENTS {
+        bigint id PK
+        string attachable_type "Ticket | TicketMessage"
+        bigint attachable_id "polymorphic FK"
+        bigint uploaded_by FK
+        string disk "private"
+        string file_name
+        string file_path
+        string mime_type
+        int file_size "bytes"
+        datetime created_at
+        datetime updated_at
+    }
+
+    TICKET_ACTIVITIES {
+        bigint id PK
+        bigint ticket_id FK
+        bigint causer_id FK
+        string event
+        json properties
+        datetime created_at
+    }
+
+    TICKET_SEQUENCES {
+        smallint year PK
+        int last_number
+        datetime updated_at
+    }
+
+    TICKET_IMPORTS {
+        bigint id PK
+        bigint user_id FK
+        string file_name
+        string file_path
+        string status "pending | processing | completed | failed"
+        int total_rows
+        int processed_rows
+        int successful_rows
+        int failed_rows
+        datetime completed_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    TICKET_IMPORT_FAILURES {
+        bigint id PK
+        bigint ticket_import_id FK
+        int row_number
+        json raw_data
+        json errors
+        datetime created_at
+    }
+```
+
+### Key Architectural & Database Design Choices
+
+- **Normalized Foreign Keys & Cascading Constraints:**
+  - `tickets.category_id`: Foreign key to `ticket_categories.id` (`RESTRICT` on delete prevents orphan tickets and accidental category deletion when active tickets exist).
+  - `tickets.created_by`: Foreign key to `users.id` with `cascadeOnDelete()`.
+  - `tickets.assigned_agent_id`: Foreign key to `users.id` with `nullOnDelete()`, ensuring that agent departures safely reset tickets to unassigned without deleting customer ticket histories.
+  - `ticket_messages.ticket_id` & `ticket_messages.user_id`: Enforce `cascadeOnDelete()` to maintain conversation integrity.
+  - `ticket_activities.ticket_id`: Foreign key with `cascadeOnDelete()`.
+  - `ticket_activities.causer_id`: Foreign key to `users.id` with `nullOnDelete()`, preserving historical audit log immutability even if the triggering user is deleted.
+  - `ticket_attachments.uploaded_by`: Foreign key to `users.id` with `nullOnDelete()`, safeguarding attachment access on private storage even if the uploader profile is removed.
+  - `ticket_imports.user_id`: Cascades on user deletion; `ticket_import_failures.ticket_import_id` cascades when an import batch is deleted.
+
+- **Auditing & Append-Only Immutability:**
+  - Append-only event tracking in `ticket_activities` acts as a lightweight event-sourcing audit trail (`ticket_created`, `ticket_assigned`, `ticket_claimed`, `priority_changed`, `status_changed`, `ticket_reopened`, `sla_escalated`, etc.).
+  - `properties` JSON column preserves structured metadata snapshots (previous vs. new status/priority, causer details, IP address, and recalculation timestamps).
+
+- **Performance & High-Traffic Composite Indexing:**
+  - `tickets (status, sla_due_at)` (`tickets_status_sla_due_index`): Powers the 60-second cron runner (`sla:check-escalations`) and SLA breach monitoring without full table scans.
+  - `tickets (assigned_agent_id, status)` (`tickets_agent_status_index`): Powers agent capacity monitoring, workload balancing queries, and personal queue triage.
+  - `tickets (created_by, status)` (`tickets_created_by_status_index`): Guarantees fast, indexed execution of customer portal queries under role-based data isolation.
+  - `tickets (status, priority)` (`tickets_status_priority_index`): Optimizes operations dashboard counters and active ticket distribution queries.
+  - `tickets (sla_status, sla_due_at)` (`tickets_sla_status_due_index`): Rapidly identifies approaching and breached tickets.
+  - `ticket_messages (ticket_id, is_internal)` (`ticket_messages_ticket_internal_index`): Enables zero-leak filtering of internal notes for customer views.
+  - `ticket_messages (ticket_id, is_internal, created_at)` (`ticket_messages_thread_index`): Enforces index-ordered conversation thread delivery without in-memory file sorting.
+  - `ticket_attachments (attachable_type, attachable_id)`: Provides high-speed polymorphic eager loading across tickets and message threads.
+  - `ticket_activities (ticket_id, created_at)` (`ticket_activities_timeline_index`): Powers chronological timeline rendering.
+  - `users (role, is_available)` (`users_role_available_index`): Speeds up auto-assignment agent pool lookups.
+
+- **Concurrency Safety & Atomic Sequences:**
+  - Dedicated `ticket_sequences` table indexed by `year` (PK).
+  - Uses `SELECT current_sequence FROM ticket_sequences WHERE year = ? FOR UPDATE` inside `DB::transaction()` to provide collision-free sequential `TKT-YYYY-NNNNNN` ticket numbers across distributed application servers.
+  - Pessimistic row locking (`lockForUpdate()`) on ticket claims and assignments protects against TOCTOU race conditions when multiple agents claim an unassigned ticket concurrently.
+
+---
+
+## 3. Local Setup Instructions
 
 ### Prerequisites
 - [Docker](https://docs.docker.com/get-docker/) (v24.0+)
@@ -121,7 +298,7 @@ This builds containers, configures environment files, runs database migrations, 
 
 ---
 
-## 3. Seeded Demo Accounts
+## 4. Seeded Demo Accounts
 
 The database seeder initializes 25 realistic support tickets, threaded messages, SLA tracking records, and 4 role-based user accounts with password `password`:
 
@@ -134,7 +311,7 @@ The database seeder initializes 25 realistic support tickets, threaded messages,
 
 ---
 
-## 4. Background Workers & Automated Scheduler
+## 5. Background Workers & Automated Scheduler
 
 The system uses dedicated background worker containers configured in `docker-compose.yml`:
 
@@ -167,7 +344,7 @@ docker compose logs -f scheduler
 
 ---
 
-## 5. Automated Testing Suite
+## 6. Automated Testing Suite
 
 The application includes an exhaustive automated test suite of **278 tests with 5,482 assertions** maintaining a 100% pass rate:
 
@@ -181,6 +358,7 @@ docker compose exec -T app php artisan test tests/Feature/Sla/SlaEscalationServi
 docker compose exec -T app php artisan test tests/Feature/Import/TicketImportTest.php
 docker compose exec -T app php artisan test tests/Feature/Search/TicketSearchTest.php
 docker compose exec -T app php artisan test tests/Feature/Dashboard/DashboardAnalyticsTest.php
+docker compose exec -T app php artisan test tests/Feature/Tickets/TicketBusinessRulesTest.php
 ```
 
 ### Test Suite Architecture
@@ -198,10 +376,11 @@ docker compose exec -T app php artisan test tests/Feature/Dashboard/DashboardAna
   - `TicketSearchTest`: Multi-filter search engine (status, priority, agent, category, SLA status, date ranges).
   - `DashboardAnalyticsTest`: Single-query conditional SQL aggregations without N+1 query regressions.
   - `TicketImportTest`: Memory-safe streaming, chunked execution, row-by-row failure reporting.
+  - `TicketBusinessRulesTest`: Auto-assignment on creation, agent visibility isolation, reassign permissions, dynamic transitions, and closed ticket replies.
 
 ---
 
-## 6. Key Architectural & Engineering Decisions (ADRs)
+## 7. Key Architectural & Engineering Decisions (ADRs)
 
 ### ADR 1: Atomic Row-Level Locking for Ticket ID Generation
 - **Problem:** Using `Ticket::count() + 1` or `max('id')` causes duplicate key collisions under concurrent write traffic.
@@ -260,7 +439,7 @@ docker compose exec -T app php artisan test tests/Feature/Dashboard/DashboardAna
 ### ADR 6: Multi-Layer Information Leak Protection (Internal Notes & Tenancy)
 - **Problem:** Customers must never see, receive, or be notified about staff internal notes (`is_internal = true`) or another customer's tickets.
 - **Decision:**
-  - **Database Scope:** `Ticket::query()->visibleTo($user)` restricts customers strictly to `created_by = $user->id`.
+  - **Database Scope:** `Ticket::query()->visibleTo($user)` restricts customers strictly to `created_by = $user->id`, and agents to unassigned or self-assigned tickets.
   - **Granular Policies:** `TicketMessagePolicy` and `TicketPolicy` enforce server-side validation; unassigned tickets or tickets assigned to another agent reject replies from non-assigned agents (except Admins).
   - **Payload Scrubbing:** Customers never receive internal messages in HTML or JSON payloads.
 
@@ -290,7 +469,7 @@ docker compose exec -T app php artisan test tests/Feature/Dashboard/DashboardAna
 
 ---
 
-## 7. CSV Bulk Import Specification
+## 8. CSV Bulk Import Specification
 
 Staff members (Admin or Agent) can upload CSV files up to 20MB at `/imports` or `/tickets/import`.
 
@@ -312,7 +491,7 @@ subject,description,priority,category,customer_email,assigned_agent_email,status
 
 ---
 
-## 8. Business Requirements to Implementation Mapping
+## 9. Business Requirements to Implementation Mapping
 
 | # | Business Requirement | Primary Implementation File(s) | Test Verification File(s) |
 | :-: | :--- | :--- | :--- |
@@ -336,7 +515,7 @@ subject,description,priority,category,customer_email,assigned_agent_email,status
 
 ---
 
-## 9. Useful Make Commands
+## 10. Useful Make Commands
 
 ```bash
 make help          # Show available targets
