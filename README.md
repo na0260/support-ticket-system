@@ -244,7 +244,21 @@ erDiagram
 ### Prerequisites
 - [Docker](https://docs.docker.com/get-docker/) (v24.0+)
 - [Docker Compose](https://docs.docker.com/compose/) (v2.20+)
+- **Git**
 - `make` (optional, for convenient shortcut execution)
+
+> **Linux / Fedora / RHEL Notice:** If your Docker container builds fail with `DNS: transient error` during Alpine `apk add` package installation:
+> 1. Add public DNS resolvers to `/etc/docker/daemon.json`:
+>    ```json
+>    { "dns": ["8.8.8.8", "1.1.1.1"] }
+>    ```
+> 2. Allow Docker forwarding in firewalld and restart the daemon:
+>    ```bash
+>    sudo firewall-cmd --zone=trusted --add-interface=docker0 --permanent && sudo firewall-cmd --reload
+>    sudo systemctl restart docker
+>    ```
+
+---
 
 ### 1-Command Automated Setup (via Make)
 From the repository root, run:
@@ -259,7 +273,7 @@ This builds containers, configures environment files, runs database migrations, 
 
 1. **Clone the Repository:**
    ```bash
-   git clone <repository-url> support-ticket
+   git clone https://github.com/na0260/support-ticket-system.git support-ticket
    cd support-ticket
    ```
 
