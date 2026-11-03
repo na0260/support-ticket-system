@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Services\Sla;
 
 use App\Enums\TicketPriority;
+use App\Models\SlaPolicy;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use InvalidArgumentException;
 use RuntimeException;
+use Throwable;
 
 /**
  * Business-hours aware SLA date arithmetic.
@@ -99,18 +101,33 @@ final readonly class BusinessHoursCalculator
 
     /**
      * Resolution target in business minutes.
+     * Checks dynamic SlaPolicy first, falling back to static settings and enum defaults.
      */
     public function resolveMinutes(int|TicketPriority $priorityOrHours): int
     {
-        $hours = $priorityOrHours instanceof TicketPriority
-            ? $this->settings->hoursFor($priorityOrHours)
-            : $priorityOrHours;
+        if ($priorityOrHours instanceof TicketPriority) {
+            $configHours = $this->settings->hoursFor($priorityOrHours);
+            if ($configHours !== $priorityOrHours->slaHours()) {
+                return $configHours * 60;
+            }
 
-        if ($hours <= 0) {
-            throw new InvalidArgumentException(sprintf('SLA duration must be a positive number of hours, %d given.', $hours));
+            try {
+                $policy = SlaPolicy::query()->where('priority', $priorityOrHours->value)->first();
+                if ($policy !== null && $policy->resolution_time_minutes > 0) {
+                    return $policy->resolution_time_minutes;
+                }
+            } catch (Throwable) {
+                // Fallback if table does not exist or during migration
+            }
+
+            return $configHours * 60;
         }
 
-        return $hours * 60;
+        if ($priorityOrHours <= 0) {
+            throw new InvalidArgumentException(sprintf('SLA duration must be a positive number of hours, %d given.', $priorityOrHours));
+        }
+
+        return $priorityOrHours * 60;
     }
 
     private function addBusinessSeconds(CarbonInterface $startDate, int $seconds): CarbonImmutable

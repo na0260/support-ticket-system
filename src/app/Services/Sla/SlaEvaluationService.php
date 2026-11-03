@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Sla;
 
 use App\Enums\SlaStatus;
+use App\Models\SlaPolicy;
 use App\Models\Ticket;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -64,8 +65,11 @@ final readonly class SlaEvaluationService
     {
         $start = CarbonImmutable::instance($startDate ?? $ticket->created_at ?? Date::now());
 
+        $policy = SlaPolicy::forPriority($ticket->priority);
+        $threshold = $policy->warning_threshold_percentage;
+
         $dueAt = $this->calculator->calculateDueAt($start, $ticket->priority);
-        $warningAt = $this->calculator->calculateWarningAt($start, $dueAt);
+        $warningAt = $this->calculator->calculateWarningAt($start, $dueAt, $threshold);
 
         // Eloquent stores the wall-clock time of the Carbon instance as-is, so
         // convert to the application timezone to persist the correct instant.

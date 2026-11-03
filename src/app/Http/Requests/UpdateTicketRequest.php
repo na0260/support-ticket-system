@@ -20,7 +20,23 @@ final class UpdateTicketRequest extends FormRequest
             return false;
         }
 
-        return $this->user()?->can('update', $ticket) ?? false;
+        $user = $this->user();
+        if ($user === null) {
+            return false;
+        }
+
+        // Check priority update authorization if priority is provided
+        if ($this->has('priority') && ! $user->can('updatePriority', $ticket)) {
+            return false;
+        }
+
+        // Check general ticket update authorization if other fields are provided
+        if (($this->has('subject') || $this->has('description') || $this->has('category_id') || $this->has('status'))
+            && ! $user->can('update', $ticket)) {
+            return false;
+        }
+
+        return $user->can('update', $ticket) || $user->can('updatePriority', $ticket);
     }
 
     /**
@@ -32,6 +48,11 @@ final class UpdateTicketRequest extends FormRequest
 
         if ($user !== null && $user->role->isCustomer()) {
             return [
+                'priority' => [
+                    'sometimes',
+                    'required',
+                    Rule::enum(TicketPriority::class),
+                ],
                 'subject' => ['sometimes', 'required', 'string', 'max:255'],
                 'description' => ['sometimes', 'required', 'string', 'min:10'],
             ];

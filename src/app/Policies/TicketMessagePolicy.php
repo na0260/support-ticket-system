@@ -26,8 +26,10 @@ class TicketMessagePolicy
 
     /**
      * Determine whether the user can add a reply to the ticket.
-     * No replies are permitted once a ticket is terminal (CLOSED).
-     * Customers may only reply to their own tickets.
+     * - No replies are permitted once a ticket is terminal (CLOSED).
+     * - Admin: permitted on any non-terminal ticket.
+     * - Agent: forbidden on unassigned tickets; permitted strictly if assigned to this agent.
+     * - Customer: permitted strictly on tickets they created.
      */
     public function create(User $user, Ticket $ticket): bool
     {
@@ -35,16 +37,27 @@ class TicketMessagePolicy
             return false;
         }
 
-        if ($user->role->isStaff()) {
+        if ($user->role->isAdmin()) {
             return true;
         }
 
-        return $ticket->created_by === $user->id;
+        if ($user->role->isAgent()) {
+            return $ticket->assigned_agent_id !== null && $ticket->assigned_agent_id === $user->id;
+        }
+
+        if ($user->role->isCustomer()) {
+            return $ticket->created_by === $user->id;
+        }
+
+        return false;
     }
 
     /**
      * Determine whether the user can create an internal note on the ticket.
-     * Strictly reserved for Admin and Agent. Forbidden for Customers under all circumstances.
+     * - Strictly reserved for Staff (Admin & Assigned Agent).
+     * - Forbidden for Customers under all circumstances.
+     * - Forbidden on unassigned tickets for agents (must be assigned first).
+     * - Forbidden for agents not assigned to the ticket.
      */
     public function createInternalNote(User $user, Ticket $ticket): bool
     {
@@ -52,6 +65,14 @@ class TicketMessagePolicy
             return false;
         }
 
-        return $user->role->isStaff();
+        if ($user->role->isAdmin()) {
+            return true;
+        }
+
+        if ($user->role->isAgent()) {
+            return $ticket->assigned_agent_id !== null && $ticket->assigned_agent_id === $user->id;
+        }
+
+        return false;
     }
 }

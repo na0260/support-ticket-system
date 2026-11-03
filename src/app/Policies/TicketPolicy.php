@@ -46,13 +46,46 @@ class TicketPolicy
      */
     public function update(User $user, Ticket $ticket): bool
     {
+        if ($ticket->status->isTerminal()) {
+            return false;
+        }
+
         if ($user->role->isStaff()) {
             return true;
         }
 
         return $ticket->created_by === $user->id
-            && $ticket->status === TicketStatus::OPEN
-            && ! $ticket->status->isTerminal();
+            && $ticket->status === TicketStatus::OPEN;
+    }
+
+    /**
+     * Determine whether the user can update the priority of the ticket.
+     * Permitted strictly for:
+     * - Customer (owner of the ticket)
+     * - Administrator
+     * - Assigned Agent (ticket.assigned_agent_id === user.id)
+     *
+     * All others (unassigned agents, other agents, non-owner customers) receive false (403).
+     */
+    public function updatePriority(User $user, Ticket $ticket): bool
+    {
+        if ($ticket->status->isTerminal()) {
+            return false;
+        }
+
+        if ($user->role->isAdmin()) {
+            return true;
+        }
+
+        if ($user->role->isAgent()) {
+            return $ticket->assigned_agent_id !== null && $ticket->assigned_agent_id === $user->id;
+        }
+
+        if ($user->role->isCustomer()) {
+            return $ticket->created_by === $user->id;
+        }
+
+        return false;
     }
 
     /**

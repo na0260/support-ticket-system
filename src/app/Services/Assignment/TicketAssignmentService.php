@@ -11,7 +11,28 @@ use App\Models\User;
 use App\Notifications\TicketAssignedNotification;
 use App\Services\Activity\TicketActivityLogger;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
+/**
+ * Service: Ticket Assignment and Concurrency Control Engine.
+ *
+ * Architecture & Strategy Pattern:
+ * - Decouples assignment algorithms via the Strategy Pattern (AssignmentStrategyInterface).
+ * - Supported strategies:
+ *   1. 'workload' (LeastWorkloadStrategy):
+ *      - Assigns to available agents with the fewest active (non-resolved, non-closed) tickets.
+ *      - Breaks ties using round-robin recency (least recently assigned agent).
+ *      - Best for customer service teams where ticket resolution velocity varies widely.
+ *   2. 'round_robin' (RoundRobinStrategy):
+ *      - Sequential circular distribution across available agents.
+ *      - Best for homogeneous ticket streams with consistent resolution times.
+ *      - Trade-off: Blind to individual backlog depth and ticket complexity.
+ *
+ * Concurrency Protection:
+ * - Enforces atomic SQL conditional updates (UPDATE ... WHERE assigned_agent_id IS NULL)
+ *   inside database transactions to protect against race conditions when concurrent agents claim
+ *   or assign the same ticket simultaneously.
+ */
 class TicketAssignmentService
 {
     public function __construct(
@@ -145,6 +166,7 @@ class TicketAssignmentService
 
     /**
      * Automatically assign a ticket using the configured or requested strategy.
+     * If no agents are available, leaves ticket unassigned and triggers an alert.
      *
      * @throws TicketAlreadyAssignedException
      */
@@ -160,6 +182,15 @@ class TicketAssignmentService
         $candidate = $strategy->pickAgent($ticket);
 
         if ($candidate === null) {
+            Log::warning(
+                sprintf('Auto-assignment alert: No available agents to assign ticket #%s (ID: %d). Ticket remains unassigned.', $ticket->ticket_number, $ticket->id),
+                [
+                    'ticket_id' => $ticket->id,
+                    'ticket_number' => $ticket->ticket_number,
+                    'strategy' => $strategyKey,
+                ]
+            );
+
             $this->activityLogger->log($ticket, 'ticket_auto_assignment_failed', $causer, [
                 'reason' => 'no_available_agents',
                 'strategy' => $strategyKey,

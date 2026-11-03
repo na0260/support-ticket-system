@@ -49,8 +49,10 @@ Route::middleware('auth')->group(function (): void {
         ->name('tickets.edit');
 
     Route::match(['put', 'patch'], '/tickets/{ticket}', [TicketController::class, 'update'])
-        ->middleware('can:update,ticket')
         ->name('tickets.update');
+
+    Route::patch('/tickets/{ticket}/priority', [TicketController::class, 'updatePriority'])
+        ->name('tickets.update_priority');
 
     Route::delete('/tickets/{ticket}', [TicketController::class, 'destroy'])
         ->middleware('can:delete,ticket')

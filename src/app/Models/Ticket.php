@@ -42,6 +42,7 @@ use Illuminate\Support\Facades\Date;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property Carbon|null $deleted_at
+ * @property-read string $sla_state
  * @property-read TicketCategory $category
  * @property-read User|null $assignedAgent
  * @property-read User $creator
@@ -163,6 +164,42 @@ class Ticket extends Model
     public function isSlaApproachingBreach(?CarbonInterface $now = null): bool
     {
         return app(SlaEvaluationService::class)->evaluate($this, $now) === SlaStatus::APPROACHING_BREACH;
+    }
+
+    /**
+     * Dynamic SLA state evaluation against the current (or given) instant.
+     * Evaluates:
+     * - 'within_sla': Current time < warning threshold.
+     * - 'approaching_breach': Warning threshold <= Current time < sla_due_at.
+     * - 'sla_breached': Current time >= sla_due_at and ticket is not resolved/closed.
+     */
+    public function getSlaState(?CarbonInterface $now = null): string
+    {
+        $currentTime = $now ? Carbon::instance($now) : Carbon::now();
+
+        if ($this->isResolved() || $this->status->isTerminal()) {
+            $completedAt = $this->resolved_at ?? $this->closed_at;
+            if ($completedAt !== null && $completedAt->isAfter($this->sla_due_at)) {
+                return 'sla_breached';
+            }
+
+            return 'within_sla';
+        }
+
+        if ($currentTime->greaterThanOrEqualTo($this->sla_due_at)) {
+            return 'sla_breached';
+        }
+
+        if ($this->sla_warning_at !== null && $currentTime->greaterThanOrEqualTo($this->sla_warning_at)) {
+            return 'approaching_breach';
+        }
+
+        return 'within_sla';
+    }
+
+    public function getSlaStateAttribute(): string
+    {
+        return $this->getSlaState();
     }
 
     /**

@@ -9,7 +9,9 @@ use App\Enums\TicketPriority;
 use App\Enums\TicketStatus;
 use App\Exceptions\TicketAlreadyAssignedException;
 use App\Http\Requests\StoreTicketRequest;
+use App\Http\Requests\UpdateTicketPriorityRequest;
 use App\Http\Requests\UpdateTicketRequest;
+use App\Models\SlaPolicy;
 use App\Models\Ticket;
 use App\Models\TicketCategory;
 use App\Models\User;
@@ -19,6 +21,7 @@ use App\Services\Activity\TicketActivityLogger;
 use App\Services\Assignment\TicketAssignmentService;
 use App\Services\AttachmentService;
 use App\Services\Sla\BusinessHoursCalculator;
+use App\Services\Sla\SlaEvaluationService;
 use App\Services\TicketNumberGenerator;
 use App\Services\TicketSearchService;
 use Illuminate\Http\JsonResponse;
@@ -119,7 +122,8 @@ final class TicketController extends Controller
         $ticket = DB::transaction(function () use ($validated, $user, $priority, $now, $numberGen, $slaCalc, $attachmentService, $activityLogger, $request): Ticket {
             $ticketNumber = $numberGen->generate();
             $dueAt = $slaCalc->calculateDueAt($now, $priority);
-            $warningAt = $slaCalc->calculateWarningAt($now, $dueAt);
+            $policy = SlaPolicy::forPriority($priority);
+            $warningAt = $slaCalc->calculateWarningAt($now, $dueAt, $policy->warning_threshold_percentage);
 
             /** @var Ticket $ticket */
             $ticket = Ticket::query()->create([
@@ -195,7 +199,12 @@ final class TicketController extends Controller
             'assignedAgent',
             'creator',
             'attachments.uploader',
-            'activities' => fn ($q) => $q->with('causer')->orderByDesc('id'),
+            'activities' => function ($q) use ($user): void {
+                if ($user->role->isCustomer()) {
+                    $q->where('event', '!=', 'internal_note_added');
+                }
+                $q->with('causer')->orderByDesc('id');
+            },
             'messages' => function ($query) use ($user): void {
                 if ($user->role->isCustomer()) {
                     $query->where('is_internal', false);
@@ -248,15 +257,55 @@ final class TicketController extends Controller
         TicketActivityLogger $activityLogger,
         BusinessHoursCalculator $slaCalc,
     ): RedirectResponse|Response|JsonResponse {
-        Gate::authorize('update', $ticket);
+        if ($request->has('priority') && ! $request->hasAny(['subject', 'description', 'category_id', 'status'])) {
+            Gate::authorize('updatePriority', $ticket);
+        } else {
+            Gate::authorize('update', $ticket);
+        }
 
         /** @var User $user */
         $user = $request->user();
         $validated = $request->validated();
 
+        if (isset($validated['priority'])) {
+            Gate::authorize('updatePriority', $ticket);
+        }
+
         $changes = [];
 
         DB::transaction(function () use ($validated, $user, $ticket, $activityLogger, $slaCalc, &$changes): void {
+            // Priority update allowed for Customer (owner), Admin, or Assigned Agent
+            if (isset($validated['priority']) && $validated['priority'] !== $ticket->priority->value) {
+                $oldPriority = $ticket->priority;
+                $newPriority = TicketPriority::from($validated['priority']);
+                $changes['priority'] = ['from' => $oldPriority->value, 'to' => $newPriority->value];
+                $ticket->priority = $newPriority;
+
+                // Recalculate SLA due dates
+                $newDueAt = $slaCalc->calculateDueAt($ticket->created_at, $newPriority);
+                $policy = SlaPolicy::forPriority($newPriority);
+                $newWarningAt = $slaCalc->calculateWarningAt($ticket->created_at, $newDueAt, $policy->warning_threshold_percentage);
+                $ticket->sla_due_at = $newDueAt;
+                $ticket->sla_warning_at = $newWarningAt;
+                $ticket->sla_status = app(SlaEvaluationService::class)->evaluate($ticket);
+
+                $auditMessage = sprintf(
+                    'Priority changed from %s to %s by %s (%s)',
+                    ucfirst($oldPriority->value),
+                    ucfirst($newPriority->value),
+                    $user->name,
+                    ucfirst($user->role->value),
+                );
+
+                $activityLogger->log($ticket, 'priority_changed', $user, [
+                    'old_priority' => $oldPriority->value,
+                    'new_priority' => $newPriority->value,
+                    'sla_due_at' => $newDueAt->toIso8601String(),
+                    'message' => $auditMessage,
+                    'description' => $auditMessage,
+                ]);
+            }
+
             if ($user->role->isCustomer()) {
                 if (isset($validated['subject']) && $validated['subject'] !== $ticket->subject) {
                     $changes['subject'] = ['from' => $ticket->subject, 'to' => $validated['subject']];
@@ -279,24 +328,6 @@ final class TicketController extends Controller
                 if (isset($validated['category_id']) && (int) $validated['category_id'] !== $ticket->category_id) {
                     $changes['category_id'] = ['from' => $ticket->category_id, 'to' => (int) $validated['category_id']];
                     $ticket->category_id = (int) $validated['category_id'];
-                }
-                if (isset($validated['priority']) && $validated['priority'] !== $ticket->priority->value) {
-                    $oldPriority = $ticket->priority;
-                    $newPriority = TicketPriority::from($validated['priority']);
-                    $changes['priority'] = ['from' => $oldPriority->value, 'to' => $newPriority->value];
-                    $ticket->priority = $newPriority;
-
-                    // Recalculate SLA due dates
-                    $newDueAt = $slaCalc->calculateDueAt($ticket->created_at, $newPriority);
-                    $newWarningAt = $slaCalc->calculateWarningAt($ticket->created_at, $newDueAt);
-                    $ticket->sla_due_at = $newDueAt;
-                    $ticket->sla_warning_at = $newWarningAt;
-
-                    $activityLogger->log($ticket, 'priority_changed', $user, [
-                        'old_priority' => $oldPriority->value,
-                        'new_priority' => $newPriority->value,
-                        'sla_due_at' => $newDueAt->toIso8601String(),
-                    ]);
                 }
                 if (isset($validated['status']) && $validated['status'] !== $ticket->status->value) {
                     $oldStatus = $ticket->status;
@@ -328,6 +359,66 @@ final class TicketController extends Controller
         return redirect()
             ->route('tickets.show', $ticket)
             ->with('status', 'Ticket updated successfully.');
+    }
+
+    /**
+     * Dedicated action for updating ticket priority.
+     */
+    public function updatePriority(
+        UpdateTicketPriorityRequest $request,
+        Ticket $ticket,
+        TicketActivityLogger $activityLogger,
+        BusinessHoursCalculator $slaCalc,
+    ): RedirectResponse|JsonResponse {
+        Gate::authorize('updatePriority', $ticket);
+
+        /** @var User $user */
+        $user = $request->user();
+        $validated = $request->validated();
+        $newPriority = TicketPriority::from($validated['priority']);
+
+        if ($newPriority !== $ticket->priority) {
+            DB::transaction(function () use ($ticket, $newPriority, $user, $slaCalc, $activityLogger): void {
+                $oldPriority = $ticket->priority;
+                $ticket->priority = $newPriority;
+
+                $newDueAt = $slaCalc->calculateDueAt($ticket->created_at, $newPriority);
+                $policy = SlaPolicy::forPriority($newPriority);
+                $newWarningAt = $slaCalc->calculateWarningAt($ticket->created_at, $newDueAt, $policy->warning_threshold_percentage);
+
+                $ticket->sla_due_at = $newDueAt;
+                $ticket->sla_warning_at = $newWarningAt;
+                $ticket->sla_status = app(SlaEvaluationService::class)->evaluate($ticket);
+                $ticket->save();
+
+                $auditMessage = sprintf(
+                    'Priority changed from %s to %s by %s (%s)',
+                    ucfirst($oldPriority->value),
+                    ucfirst($newPriority->value),
+                    $user->name,
+                    ucfirst($user->role->value),
+                );
+
+                $activityLogger->log($ticket, 'priority_changed', $user, [
+                    'old_priority' => $oldPriority->value,
+                    'new_priority' => $newPriority->value,
+                    'sla_due_at' => $newDueAt->toIso8601String(),
+                    'message' => $auditMessage,
+                    'description' => $auditMessage,
+                ]);
+            });
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'message' => 'Ticket priority updated successfully.',
+                'ticket' => $ticket->fresh(),
+            ]);
+        }
+
+        return redirect()
+            ->route('tickets.show', $ticket)
+            ->with('status', 'Ticket priority updated successfully.');
     }
 
     /**
