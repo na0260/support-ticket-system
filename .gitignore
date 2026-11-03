@@ -24,3 +24,7 @@ redis_data/
 # OS
 .DS_Store
 Thumbs.db
+
+/public/build
+public/build/
+public/hot
