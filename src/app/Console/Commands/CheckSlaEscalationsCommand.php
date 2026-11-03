@@ -14,7 +14,14 @@ final class CheckSlaEscalationsCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'tickets:check-sla';
+    protected $signature = 'sla:check-escalations';
+
+    /**
+     * Command aliases for backward compatibility.
+     *
+     * @var array<int, string>
+     */
+    protected $aliases = ['tickets:check-sla'];
 
     /**
      * The console command description.

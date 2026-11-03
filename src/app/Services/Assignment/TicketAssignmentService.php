@@ -29,7 +29,7 @@ use Illuminate\Support\Facades\Log;
  *      - Trade-off: Blind to individual backlog depth and ticket complexity.
  *
  * Concurrency Protection:
- * - Enforces atomic SQL conditional updates (UPDATE ... WHERE assigned_agent_id IS NULL)
+ * - Enforces pessimistic database locking (Ticket::where('id', $id)->lockForUpdate()->first())
  *   inside database transactions to protect against race conditions when concurrent agents claim
  *   or assign the same ticket simultaneously.
  */
@@ -56,7 +56,7 @@ class TicketAssignmentService
 
     /**
      * Manually assign or reassign a ticket to a specific agent (or unassign if $agent is null).
-     * Protects initial unassigned claims against concurrent assignments.
+     * Protects initial unassigned claims against concurrent assignments using pessimistic row-locking.
      *
      * @throws TicketAlreadyAssignedException
      */
@@ -78,25 +78,25 @@ class TicketAssignmentService
                 return $ticket;
             }
 
-            // If the ticket was previously unassigned, enforce atomic race-protected assignment
+            // If the ticket was previously unassigned, enforce pessimistic locking race protection
             if ($previousAgentId === null) {
-                $affected = Ticket::query()
+                /** @var Ticket|null $lockedTicket */
+                $lockedTicket = Ticket::query()
                     ->where('id', $ticket->id)
-                    ->whereNull('assigned_agent_id')
-                    ->whereNotIn('status', [TicketStatus::CLOSED->value])
-                    ->update([
-                        'assigned_agent_id' => $agent->id,
-                        'status' => TicketStatus::IN_PROGRESS->value,
-                        'updated_at' => now(),
-                    ]);
+                    ->lockForUpdate()
+                    ->first();
 
-                if ($affected === 0) {
+                if ($lockedTicket === null || $lockedTicket->assigned_agent_id !== null || $lockedTicket->status->isTerminal()) {
                     throw new TicketAlreadyAssignedException(
                         'This ticket has already been claimed or assigned to another agent.'
                     );
                 }
 
-                $ticket->refresh();
+                $lockedTicket->assigned_agent_id = $agent->id;
+                $lockedTicket->status = TicketStatus::IN_PROGRESS;
+                $lockedTicket->save();
+
+                $ticket = $lockedTicket;
             } else {
                 // Reassignment by authorized staff
                 $ticket->assigned_agent_id = $agent->id;
@@ -122,45 +122,37 @@ class TicketAssignmentService
     }
 
     /**
-     * Agent claims an unassigned ticket with strict atomic concurrency protection.
+     * Agent claims an unassigned ticket with strict pessimistic row locking concurrency protection.
      *
      * @throws TicketAlreadyAssignedException
      */
     public function claim(Ticket $ticket, User $agent): Ticket
     {
         return DB::transaction(function () use ($ticket, $agent): Ticket {
-            if ($ticket->assigned_agent_id !== null) {
-                throw new TicketAlreadyAssignedException(
-                    'This ticket has already been claimed or assigned to another agent.'
-                );
-            }
-
-            $affected = Ticket::query()
+            /** @var Ticket|null $lockedTicket */
+            $lockedTicket = Ticket::query()
                 ->where('id', $ticket->id)
-                ->whereNull('assigned_agent_id')
-                ->whereNotIn('status', [TicketStatus::CLOSED->value])
-                ->update([
-                    'assigned_agent_id' => $agent->id,
-                    'status' => TicketStatus::IN_PROGRESS->value,
-                    'updated_at' => now(),
-                ]);
+                ->lockForUpdate()
+                ->first();
 
-            if ($affected === 0) {
+            if ($lockedTicket === null || $lockedTicket->assigned_agent_id !== null || $lockedTicket->status->isTerminal()) {
                 throw new TicketAlreadyAssignedException(
                     'This ticket has already been claimed or assigned to another agent.'
                 );
             }
 
-            $ticket->refresh();
+            $lockedTicket->assigned_agent_id = $agent->id;
+            $lockedTicket->status = TicketStatus::IN_PROGRESS;
+            $lockedTicket->save();
 
-            $this->activityLogger->log($ticket, 'ticket_claimed', $agent, [
+            $this->activityLogger->log($lockedTicket, 'ticket_claimed', $agent, [
                 'claimed_by' => $agent->id,
                 'assigned_agent_id' => $agent->id,
             ]);
 
-            $agent->notify(new TicketAssignedNotification($ticket));
+            $agent->notify(new TicketAssignedNotification($lockedTicket));
 
-            return $ticket;
+            return $lockedTicket;
         });
     }
 
@@ -200,30 +192,28 @@ class TicketAssignmentService
         }
 
         return DB::transaction(function () use ($ticket, $candidate, $strategyKey, $causer): User {
-            $affected = Ticket::query()
+            /** @var Ticket|null $lockedTicket */
+            $lockedTicket = Ticket::query()
                 ->where('id', $ticket->id)
-                ->whereNull('assigned_agent_id')
-                ->whereNotIn('status', [TicketStatus::CLOSED->value])
-                ->update([
-                    'assigned_agent_id' => $candidate->id,
-                    'status' => TicketStatus::IN_PROGRESS->value,
-                    'updated_at' => now(),
-                ]);
+                ->lockForUpdate()
+                ->first();
 
-            if ($affected === 0) {
+            if ($lockedTicket === null || $lockedTicket->assigned_agent_id !== null || $lockedTicket->status->isTerminal()) {
                 throw new TicketAlreadyAssignedException(
                     'This ticket has already been claimed or assigned to another agent.'
                 );
             }
 
-            $ticket->refresh();
+            $lockedTicket->assigned_agent_id = $candidate->id;
+            $lockedTicket->status = TicketStatus::IN_PROGRESS;
+            $lockedTicket->save();
 
-            $this->activityLogger->log($ticket, 'ticket_auto_assigned', $causer, [
+            $this->activityLogger->log($lockedTicket, 'ticket_auto_assigned', $causer, [
                 'strategy' => $strategyKey,
                 'assigned_agent_id' => $candidate->id,
             ]);
 
-            $candidate->notify(new TicketAssignedNotification($ticket));
+            $candidate->notify(new TicketAssignedNotification($lockedTicket));
 
             return $candidate;
         });

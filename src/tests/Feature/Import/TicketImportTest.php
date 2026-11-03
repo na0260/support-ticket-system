@@ -59,6 +59,11 @@ final class TicketImportTest extends TestCase
         ]);
         $responseStore->assertForbidden();
 
+        $responseTicketsImport = $this->actingAs($this->customer)->post(route('tickets.import'), [
+            'file' => UploadedFile::fake()->create('test.csv', 10),
+        ]);
+        $responseTicketsImport->assertForbidden();
+
         $import = TicketImport::factory()->create([
             'user_id' => $this->agent->id,
             'file_name' => 'dummy.csv',
@@ -102,6 +107,28 @@ final class TicketImportTest extends TestCase
 
         $response->assertRedirect(route('imports.show', $import));
         $response->assertSessionHas('status');
+    }
+
+    #[Test]
+    public function staff_can_upload_csv_via_tickets_import_endpoint(): void
+    {
+        Queue::fake();
+
+        $csvContent = implode("\n", [
+            'subject,description,priority,category,customer_email,assigned_agent_email',
+            'API rate limiter timeout,"Rate limiter redis cluster degraded.",high,technical-inquiry,mulder@example.com,scully@example.com',
+        ]);
+
+        $file = UploadedFile::fake()->createWithContent('tickets_batch.csv', $csvContent);
+
+        $response = $this->actingAs($this->agent)->postJson(route('tickets.import'), [
+            'file' => $file,
+        ]);
+
+        $response->assertStatus(202);
+        $response->assertJsonPath('message', 'Import queued successfully.');
+
+        Queue::assertPushed(ProcessTicketImportJob::class);
     }
 
     #[Test]

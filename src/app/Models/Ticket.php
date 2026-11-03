@@ -36,6 +36,7 @@ use Illuminate\Support\Facades\Date;
  * @property Carbon $sla_due_at
  * @property Carbon|null $sla_warning_at
  * @property SlaStatus $sla_status
+ * @property bool $is_escalated
  * @property Carbon|null $escalated_at
  * @property Carbon|null $resolved_at
  * @property Carbon|null $closed_at
@@ -62,6 +63,7 @@ use Illuminate\Support\Facades\Date;
     'sla_due_at',
     'sla_warning_at',
     'sla_status',
+    'is_escalated',
     'escalated_at',
     'resolved_at',
     'closed_at',
@@ -79,6 +81,7 @@ class Ticket extends Model
     protected $attributes = [
         'status' => TicketStatus::OPEN->value,
         'sla_status' => SlaStatus::WITHIN_SLA->value,
+        'is_escalated' => false,
     ];
 
     /**
@@ -90,6 +93,7 @@ class Ticket extends Model
             'priority' => TicketPriority::class,
             'status' => TicketStatus::class,
             'sla_status' => SlaStatus::class,
+            'is_escalated' => 'boolean',
             'sla_due_at' => 'datetime',
             'sla_warning_at' => 'datetime',
             'escalated_at' => 'datetime',

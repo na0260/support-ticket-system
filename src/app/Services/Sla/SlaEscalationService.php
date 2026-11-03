@@ -30,7 +30,7 @@ class SlaEscalationService
 
         $tickets = Ticket::query()
             ->with(['assignedAgent', 'creator'])
-            ->where('status', '!=', TicketStatus::CLOSED->value)
+            ->whereNotIn('status', [TicketStatus::RESOLVED->value, TicketStatus::CLOSED->value])
             ->whereNull('resolved_at')
             ->where('sla_status', SlaStatus::WITHIN_SLA->value)
             ->whereNotNull('sla_warning_at')
@@ -47,6 +47,7 @@ class SlaEscalationService
                     ->where('sla_status', SlaStatus::WITHIN_SLA->value)
                     ->update([
                         'sla_status' => SlaStatus::APPROACHING_BREACH->value,
+                        'is_escalated' => true,
                         'updated_at' => now(),
                     ]);
 
@@ -62,6 +63,8 @@ class SlaEscalationService
                     'sla_approaching_breach',
                     null,
                     [
+                        'message' => 'Ticket automatically escalated due to SLA approaching breach',
+                        'description' => 'Ticket automatically escalated due to SLA approaching breach',
                         'sla_status' => SlaStatus::APPROACHING_BREACH->value,
                         'sla_warning_at' => $ticket->sla_warning_at?->toIso8601String(),
                         'sla_due_at' => $ticket->sla_due_at?->toIso8601String(),
@@ -93,7 +96,7 @@ class SlaEscalationService
 
         $tickets = Ticket::query()
             ->with(['assignedAgent', 'creator'])
-            ->where('status', '!=', TicketStatus::CLOSED->value)
+            ->whereNotIn('status', [TicketStatus::RESOLVED->value, TicketStatus::CLOSED->value])
             ->whereNull('resolved_at')
             ->where('sla_status', '!=', SlaStatus::BREACHED->value)
             ->whereNotNull('sla_due_at')
@@ -109,6 +112,7 @@ class SlaEscalationService
                     ->where('sla_status', '!=', SlaStatus::BREACHED->value)
                     ->update([
                         'sla_status' => SlaStatus::BREACHED->value,
+                        'is_escalated' => true,
                         'escalated_at' => $now,
                         'updated_at' => now(),
                     ]);
@@ -125,6 +129,8 @@ class SlaEscalationService
                     'ticket_escalated',
                     null,
                     [
+                        'message' => 'Ticket automatically escalated due to SLA breach',
+                        'description' => 'Ticket automatically escalated due to SLA breach',
                         'reason' => 'SLA deadline exceeded',
                         'sla_status' => SlaStatus::BREACHED->value,
                         'escalated_at' => $now->toIso8601String(),

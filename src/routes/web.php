@@ -96,10 +96,15 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('can:download,attachment')
         ->name('ticket_attachments.download');
 
+    Route::get('/tickets/attachments/{attachment}/download', [TicketAttachmentController::class, 'download'])
+        ->middleware('can:download,attachment')
+        ->name('attachments.download');
+
     // CSV Bulk Ticket Import (Staff Only: Agent & Admin)
     Route::middleware('role:agent,admin')->group(function (): void {
         Route::get('/imports', [TicketImportController::class, 'index'])->name('imports.index');
         Route::post('/imports', [TicketImportController::class, 'store'])->name('imports.store');
+        Route::post('/tickets/import', [TicketImportController::class, 'store'])->name('tickets.import');
         Route::get('/imports/sample', [TicketImportController::class, 'downloadSample'])->name('imports.sample');
         Route::get('/imports/{import}', [TicketImportController::class, 'show'])->name('imports.show');
         Route::get('/imports/{import}/failures', [TicketImportController::class, 'downloadFailures'])->name('imports.failures');
