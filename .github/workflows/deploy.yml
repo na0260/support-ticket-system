@@ -30,7 +30,7 @@ jobs:
           npm ci
           npm run build
 
-      - name: Sync Codebase to cPanel via Rsync
+      - name: Sync Files to cPanel via Rsync
         uses: easingthemes/ssh-deploy@v5.0.0
         with:
           SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_KEY }}
@@ -39,15 +39,18 @@ jobs:
           REMOTE_PORT: ${{ secrets.CPANEL_PORT }}
           SOURCE: "src/"
           TARGET: "/home/${{ secrets.CPANEL_USER }}/app_deploy/support-ticket/src"
+          SSH_CMD_ARGS: "-4 -p ${{ secrets.CPANEL_PORT }} -o StrictHostKeyChecking=no"
           ARGS: "-rlgoDzvc -i --delete --exclude='.git*' --exclude='.env' --exclude='storage/logs/*' --exclude='storage/framework/sessions/*'"
 
-      - name: Run Post-Deploy Artisan Commands
+      - name: Execute Artisan Commands on cPanel
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.CPANEL_HOST }}
           username: ${{ secrets.CPANEL_USER }}
           port: ${{ secrets.CPANEL_PORT }}
           key: ${{ secrets.CPANEL_SSH_KEY }}
+          script_stop: true
+          command_timeout: 5m
           script: |
             cd /home/${{ secrets.CPANEL_USER }}/app_deploy/support-ticket/src
             php artisan migrate --force
