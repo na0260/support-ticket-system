@@ -30,13 +30,18 @@ final class UpdateTicketRequest extends FormRequest
             return false;
         }
 
+        // Check status update authorization if status is provided
+        if ($this->has('status') && ! $user->can('updateStatus', $ticket)) {
+            return false;
+        }
+
         // Check general ticket update authorization if other fields are provided
-        if (($this->has('subject') || $this->has('description') || $this->has('category_id') || $this->has('status'))
+        if (($this->has('subject') || $this->has('description') || $this->has('category_id'))
             && ! $user->can('update', $ticket)) {
             return false;
         }
 
-        return $user->can('update', $ticket) || $user->can('updatePriority', $ticket);
+        return $user->can('update', $ticket) || $user->can('updatePriority', $ticket) || $user->can('updateStatus', $ticket);
     }
 
     /**

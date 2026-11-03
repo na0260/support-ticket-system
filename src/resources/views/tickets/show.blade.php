@@ -189,6 +189,13 @@
                             <p class="font-medium text-gray-700">{{ __('This ticket is closed.') }}</p>
                             <p class="text-xs text-gray-500 mt-1">{{ __('New replies cannot be posted to a permanently closed ticket. Please submit a new ticket if you require further assistance.') }}</p>
                         </div>
+                    @elseif ($ticket->assigned_agent_id === null && Auth::user()->role->isAgent())
+                        <div class="p-6 bg-amber-50 border border-amber-200 rounded-lg text-center text-sm text-amber-800">
+                            <svg class="mx-auto h-8 w-8 text-amber-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            <p class="font-medium text-amber-900">{{ __('You must claim this ticket before replying or updating its status.') }}</p>
+                        </div>
                     @else
                         @can('create', [App\Models\TicketMessage::class, $ticket])
                             <div x-data="{ tab: 'public', isInternal: false }" class="bg-white shadow-sm sm:rounded-lg border border-gray-200 overflow-hidden">
@@ -474,7 +481,7 @@
                     </div>
 
                     <!-- Ticket Lifecycle Actions (Resolve / Close) -->
-                    @if ($ticket->status !== \App\Enums\TicketStatus::CLOSED)
+                    @if ($ticket->status !== \App\Enums\TicketStatus::CLOSED && (auth()->user()->can('resolve', $ticket) || auth()->user()->can('close', $ticket)))
                         <div class="bg-white shadow-sm sm:rounded-lg border border-gray-200 p-6 space-y-3">
                             <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider border-b border-gray-100 pb-2">
                                 {{ __('Lifecycle Actions') }}

@@ -30,6 +30,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 final class TicketController extends Controller
@@ -258,6 +259,8 @@ final class TicketController extends Controller
     ): RedirectResponse|Response|JsonResponse {
         if ($request->has('priority') && ! $request->hasAny(['subject', 'description', 'category_id', 'status'])) {
             Gate::authorize('updatePriority', $ticket);
+        } elseif ($request->has('status') && ! $request->hasAny(['subject', 'description', 'category_id', 'priority'])) {
+            Gate::authorize('updateStatus', $ticket);
         } else {
             Gate::authorize('update', $ticket);
         }
@@ -268,6 +271,10 @@ final class TicketController extends Controller
 
         if (isset($validated['priority'])) {
             Gate::authorize('updatePriority', $ticket);
+        }
+
+        if (isset($validated['status'])) {
+            Gate::authorize('updateStatus', $ticket);
         }
 
         $changes = [];
@@ -577,6 +584,55 @@ final class TicketController extends Controller
         return redirect()
             ->route('tickets.show', $ticket)
             ->with('status', "Ticket automatically assigned to {$assignedAgent->name}.");
+    }
+
+    /**
+     * Dedicated action for updating ticket status.
+     */
+    public function updateStatus(
+        Request $request,
+        Ticket $ticket,
+        TicketActivityLogger $activityLogger,
+    ): RedirectResponse|Response|JsonResponse {
+        Gate::authorize('updateStatus', $ticket);
+
+        $validated = $request->validate([
+            'status' => ['required', Rule::enum(TicketStatus::class)],
+        ]);
+
+        /** @var User $user */
+        $user = $request->user();
+        $newStatus = TicketStatus::from($validated['status']);
+
+        if ($newStatus !== $ticket->status) {
+            $oldStatus = $ticket->status;
+            $ticket->status = $newStatus;
+
+            if ($newStatus === TicketStatus::RESOLVED) {
+                $ticket->resolved_at = now();
+            } elseif ($newStatus === TicketStatus::CLOSED) {
+                $ticket->closed_at = now();
+            }
+
+            $ticket->save();
+
+            $activityLogger->log($ticket, 'status_changed', $user, [
+                'old_status' => $oldStatus->value,
+                'new_status' => $newStatus->value,
+            ]);
+
+            if ($newStatus === TicketStatus::RESOLVED && $ticket->creator !== null) {
+                $ticket->creator->notify(new TicketResolvedNotification($ticket));
+            }
+        }
+
+        if ($request->wantsJson() || ! $request->hasHeader('Referer')) {
+            return response()->json(['message' => 'Ticket status updated successfully.']);
+        }
+
+        return redirect()
+            ->route('tickets.show', $ticket)
+            ->with('status', 'Ticket status updated successfully.');
     }
 
     /**

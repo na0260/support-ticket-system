@@ -158,17 +158,56 @@ final class TicketPolicyTest extends TestCase
     }
 
     #[Test]
-    public function agent_and_admin_can_resolve_and_close_tickets(): void
+    public function assigned_agent_and_admin_can_resolve_and_close_tickets(): void
     {
-        $ticket = Ticket::factory()->create(['status' => TicketStatus::OPEN]);
         $agent = User::factory()->agent()->create();
         $admin = User::factory()->admin()->create();
 
-        $this->actingAs($agent)->post(route('tickets.resolve', $ticket))->assertOk();
-        $this->actingAs($admin)->post(route('tickets.resolve', $ticket))->assertOk();
+        $assignedTicket = Ticket::factory()->create([
+            'status' => TicketStatus::IN_PROGRESS,
+            'assigned_agent_id' => $agent->id,
+        ]);
 
-        $this->actingAs($agent)->post(route('tickets.close', $ticket))->assertOk();
-        $this->actingAs($admin)->post(route('tickets.close', $ticket))->assertOk();
+        $this->actingAs($agent)->post(route('tickets.resolve', $assignedTicket))->assertOk();
+
+        // Admin can resolve unassigned tickets
+        $unassignedTicket = Ticket::factory()->create([
+            'status' => TicketStatus::OPEN,
+            'assigned_agent_id' => null,
+        ]);
+        $this->actingAs($admin)->post(route('tickets.resolve', $unassignedTicket))->assertOk();
+
+        // Assigned agent and admin can close
+        $this->actingAs($agent)->post(route('tickets.close', $assignedTicket))->assertOk();
+        $this->actingAs($admin)->post(route('tickets.close', $unassignedTicket))->assertOk();
+    }
+
+    #[Test]
+    public function unassigned_agent_cannot_resolve_or_close_tickets(): void
+    {
+        $agent = User::factory()->agent()->create();
+        $unassignedTicket = Ticket::factory()->create([
+            'status' => TicketStatus::OPEN,
+            'assigned_agent_id' => null,
+        ]);
+
+        $this->actingAs($agent)->post(route('tickets.resolve', $unassignedTicket))->assertForbidden();
+        $this->actingAs($agent)->post(route('tickets.close', $unassignedTicket))->assertForbidden();
+    }
+
+    #[Test]
+    public function peer_agent_cannot_resolve_or_close_someone_elses_ticket(): void
+    {
+        $agentA = User::factory()->agent()->create();
+        $agentB = User::factory()->agent()->create();
+
+        $ticketB = Ticket::factory()->create([
+            'status' => TicketStatus::IN_PROGRESS,
+            'assigned_agent_id' => $agentB->id,
+        ]);
+
+        $this->actingAs($agentA)->post(route('tickets.resolve', $ticketB))->assertForbidden();
+        $this->actingAs($agentA)->post(route('tickets.close', $ticketB))->assertForbidden();
     }
 
     #[Test]

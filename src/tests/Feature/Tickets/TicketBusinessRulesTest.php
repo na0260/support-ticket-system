@@ -328,4 +328,120 @@ final class TicketBusinessRulesTest extends TestCase
         $this->assertNotNull($note);
         $this->assertTrue($note->is_internal);
     }
+
+    #[Test]
+    public function unassigned_ticket_status_mutation_is_strictly_blocked(): void
+    {
+        $agentA = User::factory()->agent()->create(['name' => 'Agent Alpha']);
+        $customer = User::factory()->customer()->create();
+
+        $unassignedTicket = Ticket::factory()->create([
+            'assigned_agent_id' => null,
+            'status' => TicketStatus::OPEN,
+            'created_by' => $customer->id,
+        ]);
+
+        // Attempt PATCH /tickets/{ticket}/status with status = resolved
+        $this->actingAs($agentA)
+            ->patch(route('tickets.update_status', $unassignedTicket), [
+                'status' => TicketStatus::RESOLVED->value,
+            ])
+            ->assertForbidden();
+
+        // Attempt POST /tickets/{ticket}/resolve
+        $this->actingAs($agentA)
+            ->post(route('tickets.resolve', $unassignedTicket))
+            ->assertForbidden();
+
+        // Attempt POST /tickets/{ticket}/close
+        $this->actingAs($agentA)
+            ->post(route('tickets.close', $unassignedTicket))
+            ->assertForbidden();
+
+        // Attempt general update PATCH /tickets/{ticket} with status
+        $this->actingAs($agentA)
+            ->patch(route('tickets.update', $unassignedTicket), [
+                'status' => TicketStatus::RESOLVED->value,
+            ])
+            ->assertForbidden();
+
+        // Assert ticket remains open in the database
+        $unassignedTicket->refresh();
+        $this->assertSame(TicketStatus::OPEN, $unassignedTicket->status);
+        $this->assertNull($unassignedTicket->resolved_at);
+        $this->assertNull($unassignedTicket->closed_at);
+    }
+
+    #[Test]
+    public function assigned_agent_can_resolve_their_ticket(): void
+    {
+        $agentA = User::factory()->agent()->create(['name' => 'Agent Alpha']);
+        $customer = User::factory()->customer()->create();
+
+        $ticket = Ticket::factory()->create([
+            'assigned_agent_id' => $agentA->id,
+            'status' => TicketStatus::IN_PROGRESS,
+            'created_by' => $customer->id,
+        ]);
+
+        $response = $this->actingAs($agentA)
+            ->from(route('tickets.show', $ticket))
+            ->post(route('tickets.resolve', $ticket));
+
+        $response->assertRedirect(route('tickets.show', $ticket));
+
+        $ticket->refresh();
+        $this->assertSame(TicketStatus::RESOLVED, $ticket->status);
+        $this->assertNotNull($ticket->resolved_at);
+    }
+
+    #[Test]
+    public function peer_agent_cannot_resolve_someone_elses_ticket(): void
+    {
+        $agentA = User::factory()->agent()->create(['name' => 'Agent Alpha']);
+        $agentB = User::factory()->agent()->create(['name' => 'Agent Beta']);
+        $customer = User::factory()->customer()->create();
+
+        $ticketB = Ticket::factory()->create([
+            'assigned_agent_id' => $agentB->id,
+            'status' => TicketStatus::IN_PROGRESS,
+            'created_by' => $customer->id,
+        ]);
+
+        $this->actingAs($agentA)
+            ->post(route('tickets.resolve', $ticketB))
+            ->assertForbidden();
+
+        $this->actingAs($agentA)
+            ->patch(route('tickets.update_status', $ticketB), [
+                'status' => TicketStatus::RESOLVED->value,
+            ])
+            ->assertForbidden();
+
+        $ticketB->refresh();
+        $this->assertSame(TicketStatus::IN_PROGRESS, $ticketB->status);
+    }
+
+    #[Test]
+    public function administrator_can_resolve_any_ticket(): void
+    {
+        $admin = User::factory()->admin()->create(['name' => 'Super Admin']);
+        $customer = User::factory()->customer()->create();
+
+        $unassignedTicket = Ticket::factory()->create([
+            'assigned_agent_id' => null,
+            'status' => TicketStatus::OPEN,
+            'created_by' => $customer->id,
+        ]);
+
+        $response = $this->actingAs($admin)
+            ->from(route('tickets.show', $unassignedTicket))
+            ->post(route('tickets.resolve', $unassignedTicket));
+
+        $response->assertRedirect(route('tickets.show', $unassignedTicket));
+
+        $unassignedTicket->refresh();
+        $this->assertSame(TicketStatus::RESOLVED, $unassignedTicket->status);
+        $this->assertNotNull($unassignedTicket->resolved_at);
+    }
 }

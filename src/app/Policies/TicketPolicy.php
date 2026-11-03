@@ -48,7 +48,8 @@ class TicketPolicy
 
     /**
      * Determine whether the user can update the ticket.
-     * - Staff: can update status, priority, category, etc.
+     * - Administrator: can update non-terminal tickets.
+     * - Support Agent: must be assigned to this ticket; unassigned tickets cannot be updated.
      * - Customer: can update subject/description only if the ticket is OPEN and not terminal.
      */
     public function update(User $user, Ticket $ticket): bool
@@ -62,11 +63,34 @@ class TicketPolicy
         }
 
         if ($user->isAgent()) {
-            return $ticket->assigned_agent_id === null || $ticket->assigned_agent_id === $user->id;
+            return $ticket->assigned_agent_id !== null && $ticket->assigned_agent_id === $user->id;
         }
 
         return $ticket->created_by === $user->id
             && $ticket->status === TicketStatus::OPEN;
+    }
+
+    /**
+     * Determine whether the user can update the status of the ticket.
+     * - Administrator: can update status of any non-terminal ticket.
+     * - Support Agent: must be explicitly assigned to this ticket; unassigned tickets cannot be transitioned.
+     * - Customer: cannot directly update status (status changes dynamically via replies).
+     */
+    public function updateStatus(User $user, Ticket $ticket): bool
+    {
+        if ($ticket->status->isTerminal()) {
+            return false;
+        }
+
+        if ($user->isAdmin()) {
+            return true;
+        }
+
+        if ($user->isAgent()) {
+            return $ticket->assigned_agent_id !== null && $ticket->assigned_agent_id === $user->id;
+        }
+
+        return false;
     }
 
     /**
@@ -151,21 +175,27 @@ class TicketPolicy
 
     /**
      * Determine whether the user can resolve the ticket.
+     * Strict requirement: unassigned tickets cannot be resolved by agents without claiming.
      */
     public function resolve(User $user, Ticket $ticket): bool
     {
-        return $user->isStaff() && ! $ticket->status->isTerminal();
+        return $this->updateStatus($user, $ticket);
     }
 
     /**
      * Determine whether the user can close the ticket.
-     * - Staff: true
+     * - Administrator: true
+     * - Support Agent: must be explicitly assigned to this ticket
      * - Customer: true if they own the ticket
      */
     public function close(User $user, Ticket $ticket): bool
     {
-        if ($user->isStaff()) {
+        if ($user->isAdmin()) {
             return true;
+        }
+
+        if ($user->isAgent()) {
+            return $ticket->assigned_agent_id !== null && $ticket->assigned_agent_id === $user->id;
         }
 
         return $ticket->created_by === $user->id;

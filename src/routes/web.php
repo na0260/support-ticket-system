@@ -51,6 +51,10 @@ Route::middleware('auth')->group(function (): void {
     Route::match(['put', 'patch'], '/tickets/{ticket}', [TicketController::class, 'update'])
         ->name('tickets.update');
 
+    Route::patch('/tickets/{ticket}/status', [TicketController::class, 'updateStatus'])
+        ->middleware('can:updateStatus,ticket')
+        ->name('tickets.update_status');
+
     Route::patch('/tickets/{ticket}/priority', [TicketController::class, 'updatePriority'])
         ->name('tickets.update_priority');
 
