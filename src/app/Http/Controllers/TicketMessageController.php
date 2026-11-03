@@ -81,24 +81,33 @@ final class TicketMessageController extends Controller
             }
 
             // Ticket lifecycle auto-transitions:
-            // 1. If customer replies to a RESOLVED ticket: automatically reopen ticket to IN_PROGRESS or OPEN and clear resolved_at.
+            // 1. If customer replies to a RESOLVED ticket: automatically reopen ticket to IN_PROGRESS and clear resolved_at.
             if ($user->role->isCustomer() && $ticket->isResolved()) {
-                $ticket->status = $ticket->assigned_agent_id !== null ? TicketStatus::IN_PROGRESS : TicketStatus::OPEN;
+                $ticket->status = TicketStatus::IN_PROGRESS;
                 $ticket->resolved_at = null;
                 $ticket->save();
 
                 $activityLogger->log($ticket, 'ticket_reopened', $user, [
+                    'description' => 'Ticket reopened to In Progress due to customer reply',
                     'reason' => 'customer_reply',
-                    'new_status' => $ticket->status->value,
+                    'new_status' => TicketStatus::IN_PROGRESS->value,
                 ]);
             } elseif ($user->role->isStaff() && ! $isInternal) {
-                // 2. If agent replies publicly to an OPEN or WAITING_CUSTOMER ticket: transition status to WAITING_CUSTOMER
-                if ($ticket->status === TicketStatus::OPEN || $ticket->status === TicketStatus::IN_PROGRESS) {
+                // 2. If agent/admin replies publicly to a non-closed ticket: transition status to WAITING_CUSTOMER
+                if ($ticket->status !== TicketStatus::CLOSED) {
+                    $oldStatus = $ticket->status;
                     $ticket->status = TicketStatus::WAITING_CUSTOMER;
                     $ticket->save();
+
+                    if ($oldStatus !== TicketStatus::WAITING_CUSTOMER) {
+                        $activityLogger->log($ticket, 'status_changed', $user, [
+                            'description' => 'Ticket status changed to Waiting for Customer',
+                            'old_status' => $oldStatus->value,
+                            'new_status' => TicketStatus::WAITING_CUSTOMER->value,
+                        ]);
+                    }
                 }
             }
-
             // Log activity: 'agent_replied', 'customer_replied', or 'internal_note_added'
             $activityEvent = $isInternal
                 ? 'internal_note_added'

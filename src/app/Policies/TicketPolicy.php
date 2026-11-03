@@ -21,11 +21,18 @@ class TicketPolicy
 
     /**
      * Determine whether the user can view the specific ticket.
+     * - Administrators: can view any ticket across the system.
+     * - Support Agents: can view unassigned tickets or tickets assigned to themselves.
+     * - Customers: can only view tickets they created.
      */
     public function view(User $user, Ticket $ticket): bool
     {
-        if ($user->role->isStaff()) {
+        if ($user->isAdmin()) {
             return true;
+        }
+
+        if ($user->isAgent()) {
+            return $ticket->assigned_agent_id === null || $ticket->assigned_agent_id === $user->id;
         }
 
         return $ticket->created_by === $user->id;
@@ -50,8 +57,12 @@ class TicketPolicy
             return false;
         }
 
-        if ($user->role->isStaff()) {
+        if ($user->isAdmin()) {
             return true;
+        }
+
+        if ($user->isAgent()) {
+            return $ticket->assigned_agent_id === null || $ticket->assigned_agent_id === $user->id;
         }
 
         return $ticket->created_by === $user->id
@@ -73,15 +84,15 @@ class TicketPolicy
             return false;
         }
 
-        if ($user->role->isAdmin()) {
+        if ($user->isAdmin()) {
             return true;
         }
 
-        if ($user->role->isAgent()) {
+        if ($user->isAgent()) {
             return $ticket->assigned_agent_id !== null && $ticket->assigned_agent_id === $user->id;
         }
 
-        if ($user->role->isCustomer()) {
+        if ($user->isCustomer()) {
             return $ticket->created_by === $user->id;
         }
 
@@ -89,11 +100,43 @@ class TicketPolicy
     }
 
     /**
+     * Determine whether the user can manually trigger automatic ticket assignment.
+     * Strictly restricted to Administrators (agents receive 403).
+     */
+    public function autoAssign(User $user, Ticket $ticket): bool
+    {
+        return $user->isAdmin();
+    }
+
+    /**
      * Determine whether the user can assign/reassign the ticket.
+     * - Administrator: can assign unassigned or reassign any assigned ticket.
+     * - Assigned Agent: can reassign tickets assigned to themselves.
+     * - Other Agents: forbidden (403).
      */
     public function assign(User $user, Ticket $ticket): bool
     {
-        return $user->role->isStaff();
+        if ($ticket->status->isTerminal()) {
+            return false;
+        }
+
+        if ($user->isAdmin()) {
+            return true;
+        }
+
+        if ($user->isAgent()) {
+            return $ticket->assigned_agent_id !== null && $ticket->assigned_agent_id === $user->id;
+        }
+
+        return false;
+    }
+
+    /**
+     * Reassignment alias for assign.
+     */
+    public function reassign(User $user, Ticket $ticket): bool
+    {
+        return $this->assign($user, $ticket);
     }
 
     /**
@@ -101,7 +144,7 @@ class TicketPolicy
      */
     public function claim(User $user, Ticket $ticket): bool
     {
-        return $user->role->isStaff()
+        return $user->isStaff()
             && $ticket->assigned_agent_id === null
             && ! $ticket->status->isTerminal();
     }
@@ -111,7 +154,7 @@ class TicketPolicy
      */
     public function resolve(User $user, Ticket $ticket): bool
     {
-        return $user->role->isStaff() && ! $ticket->status->isTerminal();
+        return $user->isStaff() && ! $ticket->status->isTerminal();
     }
 
     /**
@@ -121,7 +164,7 @@ class TicketPolicy
      */
     public function close(User $user, Ticket $ticket): bool
     {
-        if ($user->role->isStaff()) {
+        if ($user->isStaff()) {
             return true;
         }
 
@@ -133,6 +176,6 @@ class TicketPolicy
      */
     public function delete(User $user, Ticket $ticket): bool
     {
-        return $user->role->isAdmin();
+        return $user->isAdmin();
     }
 }

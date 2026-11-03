@@ -133,6 +133,21 @@ final class AutoAssignWorkflowTest extends TestCase
     }
 
     #[Test]
+    public function agent_cannot_trigger_manual_auto_assign(): void
+    {
+        $agent = User::factory()->agent()->create();
+        $ticket = Ticket::factory()->create([
+            'assigned_agent_id' => null,
+            'status' => TicketStatus::OPEN,
+        ]);
+
+        $response = $this->actingAs($agent)
+            ->post(route('tickets.auto_assign', $ticket));
+
+        $response->assertForbidden();
+    }
+
+    #[Test]
     public function customer_cannot_trigger_auto_assign(): void
     {
         $customer = User::factory()->customer()->create();

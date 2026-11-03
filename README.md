@@ -5,7 +5,7 @@
 [![MySQL 8.0](https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat&logo=mysql)](https://mysql.com)
 [![Redis 7](https://img.shields.io/badge/Redis-7-DC382D?style=flat&logo=redis)](https://redis.io)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat&logo=docker)](https://docker.com)
-[![Tests Passing](https://img.shields.io/badge/Tests-271%20Passing-success)](https://phpunit.de)
+[![Tests Passing](https://img.shields.io/badge/Tests-278%20Passing-success)](https://phpunit.de)
 
 An enterprise-grade, containerized Support Ticket and SLA Management System built with **Laravel 11**, **PHP 8.3**, **MySQL 8.0**, and **Redis 7**. Engineered for data integrity under concurrent write loads, deterministic business-hours SLA tracking, strict role-based data isolation, asynchronous queued notifications, and memory-safe streaming of large datasets.
 
@@ -17,36 +17,37 @@ The system runs across 6 containerized services orchestrated via Docker Compose 
 
 ```mermaid
 flowchart TD
-    subgraph Client["Client Browser / API Consumer"]
-        Browser["User Web Browser"]
-    end
+  subgraph Client["Client Browser / API Consumer"]
+    Browser["User Web Browser"]
+  end
 
-    subgraph Host["Host Machine Network"]
-        PortHTTP["Port 8090 (Nginx HTTP)"]
-        PortDB["Port 3307 (MySQL)"]
-        PortRedis["Port 6380 (Redis)"]
-    end
+  subgraph Host["Host Machine Network"]
+    PortHTTP["Port 8090 (Nginx HTTP)"]
+    PortDB["Port 3307 (MySQL)"]
+    PortRedis["Port 6380 (Redis)"]
+  end
 
-    subgraph DockerNet["ticket_network (Docker Bridge)"]
-        Nginx["ticket_nginx (Nginx 1.27 Alpine)"]
-        App["ticket_app (PHP 8.3 FPM Alpine)"]
-        Worker["ticket_queue_worker (Queue Worker)"]
-        Scheduler["ticket_scheduler (Cron Scheduler)"]
-        DB[("ticket_db (MySQL 8.0)\nNamed Vol: db_data")]
-        Redis[("ticket_redis (Redis 7)\nNamed Vol: redis_data")]
-    end
+  subgraph DockerNet["ticket_network (Docker Bridge)"]
+    Nginx["ticket_nginx (Nginx 1.27 Alpine)"]
+    App["ticket_app (PHP 8.3 FPM Alpine)"]
+    Worker["ticket_queue_worker (Queue Worker)"]
+    Scheduler["ticket_scheduler (Cron Scheduler)"]
+    DB[("ticket_db (MySQL 8.0)<br/>Named Vol: db_data")]
+    Redis[("ticket_redis (Redis 7)<br/>Named Vol: redis_data")]
+  end
 
-    Browser -->|HTTP Requests| PortHTTP --> Nginx
-    Nginx -->|FastCGI (9000)| App
+  Browser -->|"HTTP Requests"| PortHTTP
+  PortHTTP --> Nginx
+  Nginx -->|"FastCGI (9000)"| App
 
-    App -->|Read / Write (3306)| DB
-    App -->|Sessions, Cache, Queues (6379)| Redis
-    App -->|Pushes Jobs| Redis
+  App -->|"Read / Write (3306)"| DB
+  App -->|"Sessions, Cache, Queues (6379)"| Redis
+  App -->|"Pushes Jobs"| Redis
 
-    Redis -->|Consumes Jobs| Worker
-    Worker -->|Processes Async Imports / Emails| DB
+  Redis -->|"Consumes Jobs"| Worker
+  Worker -->|"Processes Async Imports / Emails"| DB
 
-    Scheduler -->|Every Minute: sla:check-escalations| App
+  Scheduler -->|"Every Minute: sla:check-escalations"| App
 ```
 
 ### Container Stack & Port Matrix
@@ -169,7 +170,7 @@ docker compose logs -f scheduler
 
 ## 5. Automated Testing Suite
 
-The application includes an exhaustive automated test suite of **271 tests with 5,423 assertions** maintaining a 100% pass rate:
+The application includes an exhaustive automated test suite of **278 tests with 5,482 assertions** maintaining a 100% pass rate:
 
 ```bash
 # Run the complete test suite

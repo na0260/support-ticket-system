@@ -150,7 +150,7 @@ final class TicketMessagePolicyTest extends TestCase
     }
 
     #[Test]
-    public function no_user_can_add_replies_to_a_closed_ticket(): void
+    public function customer_cannot_reply_to_closed_ticket_but_assigned_agent_and_admin_can(): void
     {
         $customer = User::factory()->customer()->create();
         $agent = User::factory()->agent()->create();
@@ -160,25 +160,36 @@ final class TicketMessagePolicyTest extends TestCase
             ->for($customer, 'creator')
             ->create(['status' => TicketStatus::CLOSED, 'assigned_agent_id' => $agent->id]);
 
-        // Customer rejected
+        // Customer rejected (403)
         $this->actingAs($customer)
-            ->post(route('ticket_messages.store', $closedTicket))
+            ->post(route('ticket_messages.store', $closedTicket), [
+                'body' => 'Customer reply to closed ticket',
+            ])
             ->assertForbidden();
 
-        // Agent rejected
+        // Assigned Agent can reply
         $this->actingAs($agent)
-            ->post(route('ticket_messages.store', $closedTicket))
-            ->assertForbidden();
+            ->from(route('tickets.show', $closedTicket))
+            ->post(route('ticket_messages.store', $closedTicket), [
+                'body' => 'Agent reply to closed ticket',
+            ])
+            ->assertRedirect(route('tickets.show', $closedTicket));
 
-        // Admin rejected (explicit policy return false on terminal status)
+        // Admin can reply
         $this->actingAs($admin)
-            ->post(route('ticket_messages.store', $closedTicket))
-            ->assertForbidden();
+            ->from(route('tickets.show', $closedTicket))
+            ->post(route('ticket_messages.store', $closedTicket), [
+                'body' => 'Admin reply to closed ticket',
+            ])
+            ->assertRedirect(route('tickets.show', $closedTicket));
 
-        // Internal notes on closed tickets are also rejected
+        // Assigned Agent can add internal note on closed ticket
         $this->actingAs($agent)
-            ->post(route('ticket_messages.internal_note', $closedTicket))
-            ->assertForbidden();
+            ->from(route('tickets.show', $closedTicket))
+            ->post(route('ticket_messages.internal_note', $closedTicket), [
+                'body' => 'Post-closure audit note',
+            ])
+            ->assertRedirect(route('tickets.show', $closedTicket));
     }
 
     #[Test]

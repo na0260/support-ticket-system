@@ -34,8 +34,16 @@ final class DashboardAnalyticsService
      */
     private function getStaffMetrics(User $user): array
     {
-        // Single conditional aggregation query for all staff KPI counters
-        $stats = DB::table('tickets')
+        // Single conditional aggregation query for staff KPI counters, scoped by agent visibility
+        $statsQuery = DB::table('tickets');
+        if ($user->isAgent()) {
+            $statsQuery->where(function ($q) use ($user): void {
+                $q->whereNull('assigned_agent_id')
+                    ->orWhere('assigned_agent_id', $user->id);
+            });
+        }
+
+        $stats = $statsQuery
             ->selectRaw("
                 COUNT(CASE WHEN status != 'closed' THEN 1 END) as total_active,
                 COUNT(CASE WHEN assigned_agent_id IS NULL AND status != 'closed' THEN 1 END) as unassigned,
@@ -49,6 +57,7 @@ final class DashboardAnalyticsService
 
         // Priority breakdown for active tickets
         $priorityCounts = Ticket::query()
+            ->visibleTo($user)
             ->active()
             ->selectRaw('priority, count(*) as count')
             ->groupBy('priority')
@@ -62,6 +71,7 @@ final class DashboardAnalyticsService
 
         // Category breakdown for active tickets
         $categoryDistribution = Ticket::query()
+            ->visibleTo($user)
             ->active()
             ->join('ticket_categories', 'tickets.category_id', '=', 'ticket_categories.id')
             ->selectRaw('ticket_categories.name, count(*) as count')

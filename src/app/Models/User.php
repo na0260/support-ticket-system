@@ -66,6 +66,26 @@ class User extends Authenticatable
         ];
     }
 
+    public function isAdmin(): bool
+    {
+        return $this->role->isAdmin();
+    }
+
+    public function isAgent(): bool
+    {
+        return $this->role->isAgent();
+    }
+
+    public function isCustomer(): bool
+    {
+        return $this->role->isCustomer();
+    }
+
+    public function isStaff(): bool
+    {
+        return $this->role->isStaff();
+    }
+
     /**
      * @return HasMany<Ticket, $this>
      */

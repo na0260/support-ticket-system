@@ -221,15 +221,27 @@ class Ticket extends Model
 
     /**
      * Data isolation scope: restricts ticket visibility based on user role.
-     * Customers see only their own tickets; Agents and Admins see all.
+     * - Customers: see only tickets they created (created_by = user.id)
+     * - Support Agents: see unassigned tickets (assigned_agent_id is null) and tickets assigned to themselves (assigned_agent_id = user.id)
+     * - Administrators: see all tickets across the entire system
      *
      * @param  Builder<self>  $query
+     * @return Builder<self>
      */
-    public function scopeVisibleTo(Builder $query, User $user): void
+    public function scopeVisibleTo(Builder $query, User $user): Builder
     {
-        if ($user->role->isCustomer()) {
-            $query->where('created_by', $user->id);
+        if ($user->isAdmin()) {
+            return $query;
         }
+
+        if ($user->isAgent()) {
+            return $query->where(function (Builder $q) use ($user): void {
+                $q->whereNull('assigned_agent_id')
+                    ->orWhere('assigned_agent_id', $user->id);
+            });
+        }
+
+        return $query->where('created_by', $user->id);
     }
 
     /**

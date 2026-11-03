@@ -163,13 +163,12 @@ final class TicketController extends Controller
         // Send queued notification to customer
         $user->notify(new TicketCreatedNotification($ticket));
 
-        // Trigger automatic assignment on creation if configured
-        if ((bool) config('tickets.assignment.auto_assign_on_creation')) {
-            try {
-                $assignmentService->autoAssign($ticket);
-            } catch (TicketAlreadyAssignedException) {
-                // Safeguard against concurrent race
-            }
+        // Automatically attempt assignment upon creation
+        try {
+            $assignmentService->autoAssign($ticket);
+            $ticket->refresh();
+        } catch (TicketAlreadyAssignedException) {
+            // Safeguard against concurrent race
         }
 
         if ($request->wantsJson()) {
@@ -529,7 +528,7 @@ final class TicketController extends Controller
         Ticket $ticket,
         TicketAssignmentService $assignmentService,
     ): RedirectResponse|Response|JsonResponse {
-        Gate::authorize('assign', $ticket);
+        Gate::authorize('autoAssign', $ticket);
 
         /** @var User $user */
         $user = $request->user();

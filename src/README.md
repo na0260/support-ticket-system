@@ -5,7 +5,7 @@
 [![MySQL 8.0](https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat&logo=mysql)](https://mysql.com)
 [![Redis 7](https://img.shields.io/badge/Redis-7-DC382D?style=flat&logo=redis)](https://redis.io)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat&logo=docker)](https://docker.com)
-[![Tests Passing](https://img.shields.io/badge/Tests-271%20Passing-success)](https://phpunit.de)
+[![Tests Passing](https://img.shields.io/badge/Tests-278%20Passing-success)](https://phpunit.de)
 
 An enterprise-grade, containerized Support Ticket and SLA Management System built with **Laravel 11**, **PHP 8.3**, **MySQL 8.0**, and **Redis 7**. Engineered for data integrity under concurrent write loads, deterministic business-hours SLA tracking, strict role-based data isolation, asynchronous queued notifications, and memory-safe streaming of large datasets.
 
@@ -169,7 +169,7 @@ docker compose logs -f scheduler
 
 ## 5. Automated Testing Suite
 
-The application includes an exhaustive automated test suite of **271 tests with 5,423 assertions** maintaining a 100% pass rate:
+The application includes an exhaustive automated test suite of **278 tests with 5,482 assertions** maintaining a 100% pass rate:
 
 ```bash
 # Run the complete test suite

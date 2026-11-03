@@ -66,14 +66,25 @@ final class TicketPolicyTest extends TestCase
     }
 
     #[Test]
-    public function agent_and_admin_can_assign_tickets(): void
+    public function assigned_agent_and_admin_can_assign_or_reassign_tickets(): void
     {
-        $ticket = Ticket::factory()->create();
-        $agent = User::factory()->agent()->create();
+        $agentA = User::factory()->agent()->create();
+        $agentB = User::factory()->agent()->create();
         $admin = User::factory()->admin()->create();
 
-        $this->actingAs($agent)->post(route('tickets.assign', $ticket))->assertOk();
-        $this->actingAs($admin)->post(route('tickets.assign', $ticket))->assertOk();
+        $ticket = Ticket::factory()->create(['assigned_agent_id' => $agentA->id, 'status' => TicketStatus::IN_PROGRESS]);
+
+        // Assigned Agent A can reassign to Agent B
+        $this->actingAs($agentA)->post(route('tickets.assign', $ticket), ['assigned_agent_id' => $agentB->id])->assertOk();
+
+        // Admin can reassign
+        $this->actingAs($admin)->post(route('tickets.assign', $ticket), ['assigned_agent_id' => $agentA->id])->assertOk();
+
+        // Other Agent B cannot reassign when ticket is assigned to Agent A
+        $ticket->refresh();
+        $ticket->assigned_agent_id = $agentA->id;
+        $ticket->save();
+        $this->actingAs($agentB)->post(route('tickets.assign', $ticket), ['assigned_agent_id' => $agentB->id])->assertForbidden();
     }
 
     #[Test]

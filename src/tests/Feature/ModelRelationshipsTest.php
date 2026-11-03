@@ -222,7 +222,8 @@ final class ModelRelationshipsTest extends TestCase
         $customerAVisible = Ticket::query()->visibleTo($customerA)->pluck('id')->all();
         $this->assertEqualsCanonicalizing([$ticketA->id, $ticketResolved->id], $customerAVisible);
 
-        $this->assertCount(4, Ticket::query()->visibleTo($agentA)->get());
+        $agentAVisible = Ticket::query()->visibleTo($agentA)->pluck('id')->all();
+        $this->assertEqualsCanonicalizing([$ticketA->id, $ticketB->id, $ticketResolved->id], $agentAVisible);
         $this->assertCount(4, Ticket::query()->visibleTo($admin)->get());
 
         // scopeActive (excludes closed, includes open, in_progress, resolved)
